@@ -5,7 +5,7 @@ from pathlib import Path
 from apply.engine import TransactionalApplyEngine
 from git_tools.engine import GitEngine
 from release.models import ReleaseResult
-from workspace.diff_engine import WorkspaceDiffEngine
+from workspace.diff_engine import DiffPlan, WorkspaceDiffEngine
 
 
 class ReleaseCoordinator:
@@ -13,7 +13,7 @@ class ReleaseCoordinator:
     Coordinates the approved Atlas release flow.
 
     Flow:
-    1. Build workspace diff.
+    1. Build or receive a workspace diff plan.
     2. Apply actionable staged files transactionally.
     3. Commit only applied files.
     4. Optionally push the commit.
@@ -33,32 +33,41 @@ class ReleaseCoordinator:
         self.apply_engine = apply_engine
         self.diff_engine = diff_engine
 
+    def preview(self) -> DiffPlan:
+        """Build and return the current staging diff plan."""
+        return self.diff_engine.build_plan()
+
     def release(
         self,
         commit_message: str,
         push: bool = False,
         remote: str = "origin",
         branch: str = "main",
+        diff_plan: DiffPlan | None = None,
     ) -> ReleaseResult:
         cleaned_message = commit_message.strip()
 
         if not cleaned_message:
             raise ValueError("Commit message cannot be empty.")
 
-        diff_plan = self.diff_engine.build_plan()
+        active_plan = (
+            diff_plan
+            if diff_plan is not None
+            else self.preview()
+        )
 
-        if not diff_plan.has_changes:
+        if not active_plan.has_changes:
             return ReleaseResult(
                 success=True,
-                diff_plan=diff_plan,
+                diff_plan=active_plan,
             )
 
-        apply_result = self.apply_engine.apply(diff_plan)
+        apply_result = self.apply_engine.apply(active_plan)
 
         if not apply_result.success:
             return ReleaseResult(
                 success=False,
-                diff_plan=diff_plan,
+                diff_plan=active_plan,
                 apply_result=apply_result,
                 error=(
                     apply_result.error
@@ -84,7 +93,7 @@ class ReleaseCoordinator:
         if not git_result.success:
             return ReleaseResult(
                 success=False,
-                diff_plan=diff_plan,
+                diff_plan=active_plan,
                 apply_result=apply_result,
                 git_result=git_result,
                 error=(
@@ -95,7 +104,7 @@ class ReleaseCoordinator:
 
         return ReleaseResult(
             success=True,
-            diff_plan=diff_plan,
+            diff_plan=active_plan,
             apply_result=apply_result,
             git_result=git_result,
         )

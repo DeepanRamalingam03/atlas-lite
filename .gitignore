@@ -17,3 +17,6 @@ __pycache__/
 .atlas_release_project/
 .atlas_release_staging/
 .atlas_release_backups/
+.atlas_approval_release_project/
+.atlas_approval_release_staging/
+.atlas_approval_release_backups/
