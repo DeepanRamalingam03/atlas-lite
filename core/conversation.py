@@ -7,11 +7,14 @@ from core.message import Message
 
 @dataclass(slots=True)
 class Conversation:
-    messages: list[Message] = field(default_factory=list)
-    metadata: dict = field(default_factory=dict)
+    """Stores the current in-memory conversation."""
 
-    def add(self, role: str, content: str) -> None:
-        self.messages.append(Message(role=role, content=content))
+    messages: list[Message] = field(default_factory=list)
+
+    def add(self, role: str, content: str) -> Message:
+        message = Message(role=role, content=content)
+        self.messages.append(message)
+        return message
 
     def clear(self) -> None:
         self.messages.clear()

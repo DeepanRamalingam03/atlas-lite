@@ -5,11 +5,8 @@ from typing import Any
 
 
 @dataclass(slots=True)
-class Task:
-    """Represents one unit of work handled by Atlas Lite."""
-
-    prompt: str
-    provider: str | None = None
-    result: str | None = None
-    status: str = "pending"
+class ExecutionResponse:
+    success: bool
+    content: str
+    provider: str
     metadata: dict[str, Any] = field(default_factory=dict)
