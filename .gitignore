@@ -6,3 +6,10 @@ __pycache__/
 .idea/
 .atlas_staging/
 .atlas_test_staging/
+.atlas_pipeline_test/
+.atlas_diff_project/
+.atlas_diff_staging/
+.atlas_backups/
+.atlas_apply_project/
+.atlas_apply_staging/
+.atlas_apply_backups/
