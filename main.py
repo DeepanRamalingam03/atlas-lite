@@ -7,6 +7,7 @@ from clients.factory import ClientFactory
 from managers.openai_manager import OpenAIManager
 from orchestrator.pipeline import AtlasPipeline
 from services.prompt_builder import PromptBuilder
+from services.review_parser import ReviewParser
 from services.worker_output_parser import WorkerOutputParser
 from testing.runner import StagingTestRunner
 from utils.logger import setup_logger
@@ -15,16 +16,18 @@ from workspace.writer import WorkspaceWriter
 
 
 def build_pipeline() -> AtlasPipeline:
-    manager_client = ClientFactory.create("openai")
-    worker_client = ClientFactory.create("gemini")
-
     staging_root = ".atlas_staging"
 
     return AtlasPipeline(
-        manager=OpenAIManager(client=manager_client),
-        worker=GeminiWorker(client=worker_client),
+        manager=OpenAIManager(
+            client=ClientFactory.create("openai"),
+        ),
+        worker=GeminiWorker(
+            client=ClientFactory.create("gemini"),
+        ),
         prompt_builder=PromptBuilder(),
         parser=WorkerOutputParser(),
+        review_parser=ReviewParser(),
         workspace_writer=WorkspaceWriter(
             staging_root=staging_root,
         ),
@@ -64,6 +67,16 @@ def main() -> None:
     print(f"Iterations : {result.iterations}")
     print(f"Summary    : {result.summary or 'None'}")
     print(f"Test Pass  : {result.test_result.success}")
+
+    print("\nITERATION HISTORY")
+    print("-" * 72)
+
+    for record in result.history:
+        print(
+            f"Iteration {record.iteration}: "
+            f"approved={record.approved}, "
+            f"test_success={record.test_success}"
+        )
 
     print("\nSTAGED FILES")
     print("-" * 72)

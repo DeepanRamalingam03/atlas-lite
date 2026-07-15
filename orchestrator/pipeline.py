@@ -1,15 +1,26 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 from core.file_change import FileChange
 from managers.base_manager import BaseManager
 from services.prompt_builder import PromptBuilder
+from services.review_parser import ReviewDecision, ReviewParser
 from services.worker_output_parser import WorkerOutputParser
 from testing.runner import StagingTestResult, StagingTestRunner
 from workers.base_worker import BaseWorker
 from workspace.writer import WorkspaceWriter
+
+
+@dataclass(slots=True)
+class IterationRecord:
+    iteration: int
+    worker_prompt: str
+    worker_output: str
+    manager_review: str
+    approved: bool
+    test_success: bool
 
 
 @dataclass(slots=True)
@@ -22,15 +33,16 @@ class PipelineResult:
     manager_review: str
     approved: bool
     iterations: int
+    history: list[IterationRecord] = field(default_factory=list)
 
 
 class AtlasPipeline:
     """
-    Atlas Lite development pipeline.
+    Atlas Lite autonomous development pipeline.
 
     Flow:
     Manager -> Prompt Builder -> Worker -> Parser -> Staging
-    -> Test Runner -> Manager Review -> Approve or Retry
+    -> Test Runner -> Manager Review -> Intelligent Retry
     """
 
     def __init__(
@@ -39,6 +51,7 @@ class AtlasPipeline:
         worker: BaseWorker,
         prompt_builder: PromptBuilder,
         parser: WorkerOutputParser,
+        review_parser: ReviewParser,
         workspace_writer: WorkspaceWriter,
         test_runner: StagingTestRunner,
         max_iterations: int = 3,
@@ -50,6 +63,7 @@ class AtlasPipeline:
         self.worker = worker
         self.prompt_builder = prompt_builder
         self.parser = parser
+        self.review_parser = review_parser
         self.workspace_writer = workspace_writer
         self.test_runner = test_runner
         self.max_iterations = max_iterations
@@ -74,14 +88,13 @@ class AtlasPipeline:
         latest_written_paths: list[Path] = []
         latest_test_result = self._empty_test_result()
         latest_review = ""
+        history: list[IterationRecord] = []
 
         for iteration in range(1, self.max_iterations + 1):
             worker_output = self.worker.execute(worker_prompt)
 
             try:
-                summary, file_changes = self.parser.parse(
-                    worker_output
-                )
+                summary, file_changes = self.parser.parse(worker_output)
 
                 self.workspace_writer.clear()
 
@@ -102,9 +115,24 @@ class AtlasPipeline:
                     worker_output=review_input,
                 )
 
+                review_decision = self.review_parser.parse(
+                    manager_review
+                )
+
                 approved = (
                     test_result.success
-                    and self._is_approved(manager_review)
+                    and review_decision.approved
+                )
+
+                history.append(
+                    IterationRecord(
+                        iteration=iteration,
+                        worker_prompt=worker_prompt,
+                        worker_output=worker_output,
+                        manager_review=manager_review,
+                        approved=approved,
+                        test_success=test_result.success,
+                    )
                 )
 
                 latest_summary = summary
@@ -123,24 +151,29 @@ class AtlasPipeline:
                         manager_review=manager_review,
                         approved=True,
                         iterations=iteration,
+                        history=history,
                     )
 
-                worker_prompt = (
-                    self.prompt_builder.build_retry_prompt(
-                        goal=cleaned_goal,
-                        manager_instruction=manager_instruction,
-                        manager_review=manager_review,
-                        test_output=(
-                            test_result.combined_output
-                            or "No test diagnostics were produced."
-                        ),
-                    )
+                worker_prompt = self._build_retry_prompt(
+                    goal=cleaned_goal,
+                    manager_instruction=manager_instruction,
+                    decision=review_decision,
+                    test_result=test_result,
+                    iteration=iteration + 1,
                 )
 
             except Exception as exc:
-                latest_review = (
-                    "The worker response could not be processed.\n"
+                error_message = (
                     f"{type(exc).__name__}: {exc}"
+                )
+
+                latest_review = (
+                    "DECISION: REJECTED\n\n"
+                    "REASON:\n"
+                    "The worker response could not be processed.\n\n"
+                    "FIX_INSTRUCTION:\n"
+                    "Return valid JSON matching the required schema with "
+                    "complete file contents."
                 )
 
                 latest_test_result = StagingTestResult(
@@ -148,15 +181,33 @@ class AtlasPipeline:
                     command=[],
                     return_code=-1,
                     stdout="",
-                    stderr=str(exc),
+                    stderr=error_message,
+                )
+
+                history.append(
+                    IterationRecord(
+                        iteration=iteration,
+                        worker_prompt=worker_prompt,
+                        worker_output=worker_output,
+                        manager_review=latest_review,
+                        approved=False,
+                        test_success=False,
+                    )
                 )
 
                 worker_prompt = (
                     self.prompt_builder.build_retry_prompt(
                         goal=cleaned_goal,
                         manager_instruction=manager_instruction,
-                        manager_review=latest_review,
-                        test_output=str(exc),
+                        rejection_reason=(
+                            "The worker response could not be processed."
+                        ),
+                        fix_instruction=(
+                            "Return valid JSON matching the required schema "
+                            "with complete file contents."
+                        ),
+                        test_output=error_message,
+                        iteration=iteration + 1,
                     )
                 )
 
@@ -169,6 +220,27 @@ class AtlasPipeline:
             manager_review=latest_review,
             approved=False,
             iterations=self.max_iterations,
+            history=history,
+        )
+
+    def _build_retry_prompt(
+        self,
+        goal: str,
+        manager_instruction: str,
+        decision: ReviewDecision,
+        test_result: StagingTestResult,
+        iteration: int,
+    ) -> str:
+        return self.prompt_builder.build_retry_prompt(
+            goal=goal,
+            manager_instruction=manager_instruction,
+            rejection_reason=decision.reason,
+            fix_instruction=decision.fix_instruction,
+            test_output=(
+                test_result.combined_output
+                or "No test diagnostics were produced."
+            ),
+            iteration=iteration,
         )
 
     @staticmethod
@@ -185,15 +257,6 @@ class AtlasPipeline:
             "Output:\n"
             f"{test_result.combined_output or 'No output'}"
         )
-
-    @staticmethod
-    def _is_approved(manager_review: str) -> bool:
-        lines = manager_review.strip().splitlines()
-
-        if not lines:
-            return False
-
-        return lines[0].strip().upper() == "DECISION: APPROVED"
 
     @staticmethod
     def _empty_test_result() -> StagingTestResult:
