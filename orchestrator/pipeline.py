@@ -5,6 +5,7 @@ from pathlib import Path
 
 from core.file_change import FileChange
 from managers.base_manager import BaseManager
+from services.prompt_builder import PromptBuilder
 from services.worker_output_parser import WorkerOutputParser
 from testing.runner import StagingTestResult, StagingTestRunner
 from workers.base_worker import BaseWorker
@@ -25,10 +26,10 @@ class PipelineResult:
 
 class AtlasPipeline:
     """
-    Main Atlas Lite development pipeline.
+    Atlas Lite development pipeline.
 
     Flow:
-    Manager -> Worker -> Parser -> Staging Workspace
+    Manager -> Prompt Builder -> Worker -> Parser -> Staging
     -> Test Runner -> Manager Review -> Approve or Retry
     """
 
@@ -36,6 +37,7 @@ class AtlasPipeline:
         self,
         manager: BaseManager,
         worker: BaseWorker,
+        prompt_builder: PromptBuilder,
         parser: WorkerOutputParser,
         workspace_writer: WorkspaceWriter,
         test_runner: StagingTestRunner,
@@ -46,6 +48,7 @@ class AtlasPipeline:
 
         self.manager = manager
         self.worker = worker
+        self.prompt_builder = prompt_builder
         self.parser = parser
         self.workspace_writer = workspace_writer
         self.test_runner = test_runner
@@ -57,7 +60,14 @@ class AtlasPipeline:
         if not cleaned_goal:
             raise ValueError("Goal cannot be empty.")
 
-        worker_prompt = self.manager.create_worker_prompt(cleaned_goal)
+        manager_instruction = self.manager.create_worker_prompt(
+            cleaned_goal
+        )
+
+        worker_prompt = self.prompt_builder.build_initial_prompt(
+            goal=cleaned_goal,
+            manager_instruction=manager_instruction,
+        )
 
         latest_summary = ""
         latest_changes: list[FileChange] = []
@@ -69,7 +79,9 @@ class AtlasPipeline:
             worker_output = self.worker.execute(worker_prompt)
 
             try:
-                summary, file_changes = self.parser.parse(worker_output)
+                summary, file_changes = self.parser.parse(
+                    worker_output
+                )
 
                 self.workspace_writer.clear()
 
@@ -113,20 +125,24 @@ class AtlasPipeline:
                         iterations=iteration,
                     )
 
-                correction = self._build_correction_instruction(
-                    manager_review=manager_review,
-                    test_result=test_result,
+                worker_prompt = (
+                    self.prompt_builder.build_retry_prompt(
+                        goal=cleaned_goal,
+                        manager_instruction=manager_instruction,
+                        manager_review=manager_review,
+                        test_output=(
+                            test_result.combined_output
+                            or "No test diagnostics were produced."
+                        ),
+                    )
                 )
 
             except Exception as exc:
-                correction = (
-                    "The previous worker response could not be processed.\n"
-                    f"ERROR:\n{type(exc).__name__}: {exc}\n\n"
-                    "Return corrected valid JSON using the required schema. "
-                    "Include complete file contents only."
+                latest_review = (
+                    "The worker response could not be processed.\n"
+                    f"{type(exc).__name__}: {exc}"
                 )
 
-                latest_review = correction
                 latest_test_result = StagingTestResult(
                     success=False,
                     command=[],
@@ -135,11 +151,14 @@ class AtlasPipeline:
                     stderr=str(exc),
                 )
 
-            worker_prompt = (
-                f"{worker_prompt}\n\n"
-                f"RETRY ITERATION {iteration}:\n"
-                f"{correction}"
-            )
+                worker_prompt = (
+                    self.prompt_builder.build_retry_prompt(
+                        goal=cleaned_goal,
+                        manager_instruction=manager_instruction,
+                        manager_review=latest_review,
+                        test_output=str(exc),
+                    )
+                )
 
         return PipelineResult(
             goal=cleaned_goal,
@@ -163,26 +182,8 @@ class AtlasPipeline:
             "STAGING TEST RESULT:\n"
             f"Success: {test_result.success}\n"
             f"Return code: {test_result.return_code}\n"
-            f"Output:\n{test_result.combined_output or 'No output'}"
-        )
-
-    @staticmethod
-    def _build_correction_instruction(
-        manager_review: str,
-        test_result: StagingTestResult,
-    ) -> str:
-        diagnostics = (
-            test_result.combined_output
-            or "No test diagnostics were produced."
-        )
-
-        return (
-            "Correct every issue identified below.\n\n"
-            "MANAGER REVIEW:\n"
-            f"{manager_review}\n\n"
-            "TEST DIAGNOSTICS:\n"
-            f"{diagnostics}\n\n"
-            "Return valid JSON only with complete file contents."
+            "Output:\n"
+            f"{test_result.combined_output or 'No output'}"
         )
 
     @staticmethod

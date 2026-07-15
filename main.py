@@ -6,6 +6,7 @@ import config
 from clients.factory import ClientFactory
 from managers.openai_manager import OpenAIManager
 from orchestrator.pipeline import AtlasPipeline
+from services.prompt_builder import PromptBuilder
 from services.worker_output_parser import WorkerOutputParser
 from testing.runner import StagingTestRunner
 from utils.logger import setup_logger
@@ -17,14 +18,12 @@ def build_pipeline() -> AtlasPipeline:
     manager_client = ClientFactory.create("openai")
     worker_client = ClientFactory.create("gemini")
 
-    manager = OpenAIManager(client=manager_client)
-    worker = GeminiWorker(client=worker_client)
-
     staging_root = ".atlas_staging"
 
     return AtlasPipeline(
-        manager=manager,
-        worker=worker,
+        manager=OpenAIManager(client=manager_client),
+        worker=GeminiWorker(client=worker_client),
+        prompt_builder=PromptBuilder(),
         parser=WorkerOutputParser(),
         workspace_writer=WorkspaceWriter(
             staging_root=staging_root,
@@ -56,8 +55,7 @@ def main() -> None:
 
     logger.info("Starting Atlas Lite development pipeline.")
 
-    pipeline = build_pipeline()
-    result = pipeline.execute(args.goal)
+    result = build_pipeline().execute(args.goal)
 
     print("\n" + "=" * 72)
     print("ATLAS LITE PIPELINE RESULT")
