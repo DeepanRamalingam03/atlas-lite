@@ -7,7 +7,7 @@ from clients.base_client import BaseClient
 
 
 class GeminiClient(BaseClient):
-    """Minimal Gemini API client used by Atlas Lite workers."""
+    """Gemini API client used by Atlas Lite workers."""
 
     def __init__(
         self,
@@ -25,15 +25,18 @@ class GeminiClient(BaseClient):
             raise ValueError("Timeout must be greater than zero.")
 
         self.model_name = model_name
-        self.timeout = timeout
+        self.timeout_seconds = timeout
+
         self.client = genai.Client(
             api_key=api_key,
-            http_options=types.HttpOptions(timeout=float(timeout)),
+            http_options=types.HttpOptions(
+                timeout=timeout * 1000
+            ),
         )
 
     def generate(self, prompt: str) -> str:
-        """Send one prompt to Gemini and return its text response."""
         cleaned_prompt = prompt.strip()
+
         if not cleaned_prompt:
             raise ValueError("Prompt cannot be empty.")
 
@@ -43,7 +46,8 @@ class GeminiClient(BaseClient):
         )
 
         response_text = getattr(response, "text", None)
+
         if not response_text:
             raise RuntimeError("Gemini returned an empty response.")
 
-        return response_text
+        return response_text.strip()
