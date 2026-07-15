@@ -14,3 +14,6 @@ __pycache__/
 .atlas_apply_staging/
 .atlas_apply_backups/
 .atlas_git_test_repo/
+.atlas_release_project/
+.atlas_release_staging/
+.atlas_release_backups/
