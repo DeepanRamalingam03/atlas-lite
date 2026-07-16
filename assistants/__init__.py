@@ -1,11 +1,5 @@
 from __future__ import annotations
 
-from assistants.service import (
-    AtlasAssistant,
-    ConversationTurn,
-)
+from assistants.service import AtlasAssistant
 
-__all__ = [
-    "AtlasAssistant",
-    "ConversationTurn",
-]
+__all__ = ["AtlasAssistant"]
