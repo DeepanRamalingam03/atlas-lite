@@ -17,7 +17,7 @@ logger = logging.getLogger(__name__)
 
 class AtlasDiscordBot(commands.Bot):
     """
-    Discord communication gateway for Atlas Lite.
+    Discord communication and runtime control gateway for Atlas Lite.
 
     Commands:
     - !ping
@@ -27,6 +27,10 @@ class AtlasDiscordBot(commands.Bot):
     - !runtime
     - !roadmap
     - !workflow [workflow_id]
+    - !heartbeat
+    - !alerts
+    - !ackalerts
+    - !addtask <priority> | <title> | <goal>
     - !pause <roadmap_task_id>
     - !resume <roadmap_task_id>
     """
@@ -39,7 +43,9 @@ class AtlasDiscordBot(commands.Bot):
         channel_id: int,
         allowed_user_id: int,
         assistant: AtlasAssistant,
-        runtime_controls: DiscordRuntimeControls | None = None,
+        runtime_controls: (
+            DiscordRuntimeControls | None
+        ) = None,
     ) -> None:
         intents = discord.Intents.default()
         intents.message_content = True
@@ -65,7 +71,9 @@ class AtlasDiscordBot(commands.Bot):
     def _register_commands(self) -> None:
         @self.command(name="ping")
         async def ping_command(
-            context: commands.Context[AtlasDiscordBot],
+            context: commands.Context[
+                AtlasDiscordBot
+            ],
         ) -> None:
             latency_ms = round(
                 self.latency * 1000
@@ -78,7 +86,9 @@ class AtlasDiscordBot(commands.Bot):
 
         @self.command(name="status")
         async def status_command(
-            context: commands.Context[AtlasDiscordBot],
+            context: commands.Context[
+                AtlasDiscordBot
+            ],
         ) -> None:
             history_size = (
                 self.assistant.history_size(
@@ -86,10 +96,9 @@ class AtlasDiscordBot(commands.Bot):
                 )
             )
 
-            runtime = (
-                self.runtime_controls.runtime_status(
-                    context.author.id
-                )
+            runtime = await asyncio.to_thread(
+                self.runtime_controls.runtime_status,
+                context.author.id,
             )
 
             message = (
@@ -103,14 +112,16 @@ class AtlasDiscordBot(commands.Bot):
                 f"{runtime.message}"
             )
 
-            for chunk in self._split_message(
-                message
-            ):
-                await context.send(chunk)
+            await self._send_chunks(
+                context,
+                message,
+            )
 
         @self.command(name="ask")
         async def ask_command(
-            context: commands.Context[AtlasDiscordBot],
+            context: commands.Context[
+                AtlasDiscordBot
+            ],
             *,
             question: str,
         ) -> None:
@@ -136,18 +147,21 @@ class AtlasDiscordBot(commands.Bot):
 
                     await context.send(
                         "Atlas AI request failed: "
-                        f"`{type(exc).__name__}: {exc}`"
+                        f"`{type(exc).__name__}: "
+                        f"{exc}`"
                     )
                     return
 
-            for chunk in self._split_message(
-                answer
-            ):
-                await context.send(chunk)
+            await self._send_chunks(
+                context,
+                answer,
+            )
 
         @self.command(name="reset")
         async def reset_command(
-            context: commands.Context[AtlasDiscordBot],
+            context: commands.Context[
+                AtlasDiscordBot
+            ],
         ) -> None:
             self.assistant.clear_history(
                 context.author.id
@@ -159,50 +173,146 @@ class AtlasDiscordBot(commands.Bot):
 
         @self.command(name="runtime")
         async def runtime_command(
-            context: commands.Context[AtlasDiscordBot],
+            context: commands.Context[
+                AtlasDiscordBot
+            ],
         ) -> None:
             result = await asyncio.to_thread(
                 self.runtime_controls.runtime_status,
                 context.author.id,
             )
 
-            for chunk in self._split_message(
-                result.message
-            ):
-                await context.send(chunk)
+            await self._send_chunks(
+                context,
+                result.message,
+            )
 
         @self.command(name="roadmap")
         async def roadmap_command(
-            context: commands.Context[AtlasDiscordBot],
+            context: commands.Context[
+                AtlasDiscordBot
+            ],
         ) -> None:
             result = await asyncio.to_thread(
-                self.runtime_controls.roadmap_status
+                self.runtime_controls
+                .roadmap_status
             )
 
-            for chunk in self._split_message(
-                result.message
-            ):
-                await context.send(chunk)
+            await self._send_chunks(
+                context,
+                result.message,
+            )
 
         @self.command(name="workflow")
         async def workflow_command(
-            context: commands.Context[AtlasDiscordBot],
+            context: commands.Context[
+                AtlasDiscordBot
+            ],
             workflow_id: str | None = None,
         ) -> None:
             result = await asyncio.to_thread(
-                self.runtime_controls.workflow_status,
+                self.runtime_controls
+                .workflow_status,
                 context.author.id,
                 workflow_id,
             )
 
-            for chunk in self._split_message(
+            await self._send_chunks(
+                context,
+                result.message,
+            )
+
+        @self.command(name="heartbeat")
+        async def heartbeat_command(
+            context: commands.Context[
+                AtlasDiscordBot
+            ],
+        ) -> None:
+            result = await asyncio.to_thread(
+                self.runtime_controls
+                .heartbeat_status
+            )
+
+            await self._send_chunks(
+                context,
+                result.message,
+            )
+
+        @self.command(name="alerts")
+        async def alerts_command(
+            context: commands.Context[
+                AtlasDiscordBot
+            ],
+        ) -> None:
+            result = await asyncio.to_thread(
+                self.runtime_controls
+                .alerts_status
+            )
+
+            await self._send_chunks(
+                context,
+                result.message,
+            )
+
+        @self.command(name="ackalerts")
+        async def acknowledge_alerts_command(
+            context: commands.Context[
+                AtlasDiscordBot
+            ],
+        ) -> None:
+            result = await asyncio.to_thread(
+                self.runtime_controls
+                .acknowledge_alerts
+            )
+
+            await context.send(
                 result.message
-            ):
-                await context.send(chunk)
+            )
+
+        @self.command(name="addtask")
+        async def add_task_command(
+            context: commands.Context[
+                AtlasDiscordBot
+            ],
+            *,
+            directive: str,
+        ) -> None:
+            try:
+                priority, title, goal = (
+                    self._parse_add_task(
+                        directive
+                    )
+                )
+            except ValueError as exc:
+                await context.send(
+                    f"{exc}\n"
+                    "Usage: "
+                    "`!addtask "
+                    "<priority> | <title> | <goal>`"
+                )
+                return
+
+            result = await asyncio.to_thread(
+                self.runtime_controls.add_directive,
+                title=title,
+                goal=goal,
+                priority=priority,
+                source=(
+                    "discord-architect:"
+                    f"{context.author.id}"
+                ),
+            )
+
+            await self._send_chunks(
+                context,
+                result.message,
+            )
 
         @self.command(name="pause")
         async def pause_command(
-            context: commands.Context[AtlasDiscordBot],
+            context: commands.Context[
+                AtlasDiscordBot
+            ],
             task_id: str,
         ) -> None:
             result = await asyncio.to_thread(
@@ -216,7 +326,9 @@ class AtlasDiscordBot(commands.Bot):
 
         @self.command(name="resume")
         async def resume_command(
-            context: commands.Context[AtlasDiscordBot],
+            context: commands.Context[
+                AtlasDiscordBot
+            ],
             task_id: str,
         ) -> None:
             result = await asyncio.to_thread(
@@ -272,6 +384,11 @@ class AtlasDiscordBot(commands.Bot):
             "`!runtime`\n"
             "`!roadmap`\n"
             "`!workflow [workflow_id]`\n"
+            "`!heartbeat`\n"
+            "`!alerts`\n"
+            "`!ackalerts`\n"
+            "`!addtask "
+            "<priority> | <title> | <goal>`\n"
             "`!pause <roadmap_task_id>`\n"
             "`!resume <roadmap_task_id>`\n"
             "`!ping`\n"
@@ -282,7 +399,9 @@ class AtlasDiscordBot(commands.Bot):
 
     async def on_command_error(
         self,
-        context: commands.Context[AtlasDiscordBot],
+        context: commands.Context[
+            AtlasDiscordBot
+        ],
         error: commands.CommandError,
     ) -> None:
         if isinstance(
@@ -296,7 +415,8 @@ class AtlasDiscordBot(commands.Bot):
             commands.MissingRequiredArgument,
         ):
             await context.send(
-                "Missing input. Check command usage with "
+                "Missing input. "
+                "Check command usage with "
                 "`!status`."
             )
             return
@@ -340,6 +460,18 @@ class AtlasDiscordBot(commands.Bot):
             message
         )
 
+    async def _send_chunks(
+        self,
+        context: commands.Context[
+            AtlasDiscordBot
+        ],
+        content: str,
+    ) -> None:
+        for chunk in self._split_message(
+            content
+        ):
+            await context.send(chunk)
+
     def _is_allowed(
         self,
         guild_id: int | None,
@@ -354,6 +486,50 @@ class AtlasDiscordBot(commands.Bot):
             and user_id
             == self.allowed_user_id
         )
+
+    @staticmethod
+    def _parse_add_task(
+        content: str,
+    ) -> tuple[int, str, str]:
+        parts = [
+            part.strip()
+            for part in content.split(
+                "|",
+                maxsplit=2,
+            )
+        ]
+
+        if len(parts) != 3:
+            raise ValueError(
+                "Task input must contain priority, "
+                "title, and goal separated by `|`."
+            )
+
+        priority_text, title, goal = parts
+
+        try:
+            priority = int(priority_text)
+        except ValueError as exc:
+            raise ValueError(
+                "Task priority must be an integer."
+            ) from exc
+
+        if priority < 0:
+            raise ValueError(
+                "Task priority cannot be negative."
+            )
+
+        if not title:
+            raise ValueError(
+                "Task title cannot be empty."
+            )
+
+        if not goal:
+            raise ValueError(
+                "Task goal cannot be empty."
+            )
+
+        return priority, title, goal
 
     @classmethod
     def _split_message(

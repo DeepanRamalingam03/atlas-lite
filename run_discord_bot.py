@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+from pathlib import Path
 
 import config
 from assistants.service import AtlasAssistant
@@ -12,6 +13,13 @@ from core.intent_router import IntentRouter
 from core.memory_store import (
     PersistentMemoryStore,
 )
+from core.orchestration.directive_importer import (
+    ArchitectDirectiveStore,
+)
+from core.orchestration.observability import (
+    RuntimeAlertStore,
+    RuntimeHeartbeatStore,
+)
 from core.orchestration.roadmap import (
     RoadmapTaskSelector,
     RoadmapTaskStore,
@@ -19,9 +27,7 @@ from core.orchestration.roadmap import (
 from core.orchestration.state_store import (
     WorkflowStateStore,
 )
-from discord_gateway.bot import (
-    AtlasDiscordBot,
-)
+from discord_gateway.bot import AtlasDiscordBot
 from discord_gateway.runtime_controls import (
     DiscordRuntimeControls,
 )
@@ -29,6 +35,10 @@ from services.code_validator import (
     PythonCodeValidator,
 )
 from utils.logger import setup_logger
+
+
+PROJECT_ROOT = Path(__file__).resolve().parent
+DATA_ROOT = PROJECT_ROOT / ".atlas_data"
 
 
 def required_integer(
@@ -63,8 +73,8 @@ def build_assistant() -> AtlasAssistant:
         router=IntentRouter(),
         memory=PersistentMemoryStore(
             storage_path=(
-                ".atlas_data/"
-                "conversation_memory.json"
+                DATA_ROOT
+                / "conversation_memory.json"
             ),
             max_turns_per_user=12,
         ),
@@ -79,16 +89,41 @@ def build_assistant() -> AtlasAssistant:
 
 def build_runtime_controls(
 ) -> DiscordRuntimeControls:
+    DATA_ROOT.mkdir(
+        parents=True,
+        exist_ok=True,
+    )
+
     roadmap_store = RoadmapTaskStore(
         storage_path=(
-            ".atlas_data/roadmap_tasks.json"
+            DATA_ROOT / "roadmap_tasks.json"
         )
     )
 
     workflow_store = WorkflowStateStore(
         storage_path=(
-            ".atlas_data/"
-            "orchestration_workflows.json"
+            DATA_ROOT
+            / "orchestration_workflows.json"
+        )
+    )
+
+    directive_store = ArchitectDirectiveStore(
+        storage_path=(
+            DATA_ROOT
+            / "architect_directives.json"
+        )
+    )
+
+    heartbeat_store = RuntimeHeartbeatStore(
+        storage_path=(
+            DATA_ROOT
+            / "runtime_heartbeat.json"
+        )
+    )
+
+    alert_store = RuntimeAlertStore(
+        storage_path=(
+            DATA_ROOT / "runtime_alerts.json"
         )
     )
 
@@ -98,6 +133,9 @@ def build_runtime_controls(
         roadmap_selector=RoadmapTaskSelector(
             roadmap_store
         ),
+        directive_store=directive_store,
+        heartbeat_store=heartbeat_store,
+        alert_store=alert_store,
     )
 
 
