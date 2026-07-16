@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 from dataclasses import dataclass
 from pathlib import PurePosixPath
 from typing import Any, Protocol
@@ -42,20 +43,46 @@ class ContinuousRunResult:
     autonomy_decision: AutonomyDecision | None
     completed: bool
     waiting_for_human: bool
+    resumed: bool
     error: str | None
 
 
 class ContinuousOrchestrator:
     """
-    Connects the existing Atlas development modules into one runtime cycle.
+    Connects existing Atlas development modules into one recoverable cycle.
 
-    Existing module flow:
-    - AtlasPipeline performs Manager -> Worker -> Staging -> Validation
-      -> Manager Review.
-    - AutonomyPolicy decides whether the proposed operation can continue.
-    - ReleaseCoordinator performs transactional apply, Git commit, and push.
-    - WorkflowStateStore persists every important lifecycle transition.
+    Flow:
+    - AtlasPipeline performs manager, worker, staging, validation, and review.
+    - AutonomyPolicy checks proposed file operations and Git push.
+    - ReleaseCoordinator performs transactional apply, commit, and push.
+    - WorkflowStateStore persists lifecycle state for restart recovery.
     """
+
+    TERMINAL_STATUSES = frozenset(
+        {
+            WorkflowStatus.COMPLETED,
+            WorkflowStatus.FAILED,
+            WorkflowStatus.REJECTED,
+            WorkflowStatus.STOPPED,
+        }
+    )
+
+    PRE_RELEASE_STATUSES = frozenset(
+        {
+            WorkflowStatus.CREATED,
+            WorkflowStatus.PLANNING,
+            WorkflowStatus.EXECUTING,
+            WorkflowStatus.VALIDATING,
+            WorkflowStatus.REVIEWING,
+        }
+    )
+
+    RELEASE_RESUME_STATUSES = frozenset(
+        {
+            WorkflowStatus.APPROVED,
+            WorkflowStatus.APPLYING,
+        }
+    )
 
     def __init__(
         self,
@@ -110,29 +137,124 @@ class ContinuousOrchestrator:
             workflow_id=workflow_id,
         )
 
+        return self._execute_pre_release(
+            workflow=workflow,
+            commit_message=commit_message,
+            resumed=False,
+        )
+
+    def resume_workflow(
+        self,
+        workflow_id: str,
+        *,
+        commit_message: str | None = None,
+    ) -> ContinuousRunResult:
+        workflow = self.workflow_store.require(
+            workflow_id
+        )
+
+        if workflow.status in self.TERMINAL_STATUSES:
+            return ContinuousRunResult(
+                workflow=workflow,
+                pipeline_result=None,
+                release_result=None,
+                autonomy_decision=None,
+                completed=(
+                    workflow.status
+                    == WorkflowStatus.COMPLETED
+                ),
+                waiting_for_human=False,
+                resumed=True,
+                error=workflow.error,
+            )
+
+        if (
+            workflow.status
+            == WorkflowStatus.WAITING_APPROVAL
+        ):
+            return ContinuousRunResult(
+                workflow=workflow,
+                pipeline_result=None,
+                release_result=None,
+                autonomy_decision=None,
+                completed=False,
+                waiting_for_human=True,
+                resumed=True,
+                error=None,
+            )
+
+        if workflow.status in self.RELEASE_RESUME_STATUSES:
+            return self._execute_release(
+                workflow=workflow,
+                pipeline_result=None,
+                autonomy_decision=None,
+                commit_message=commit_message,
+                resumed=True,
+            )
+
+        if workflow.status in self.PRE_RELEASE_STATUSES:
+            return self._execute_pre_release(
+                workflow=workflow,
+                commit_message=commit_message,
+                resumed=True,
+            )
+
+        error = (
+            "Unsupported workflow recovery status: "
+            f"{workflow.status.value}"
+        )
+
+        return ContinuousRunResult(
+            workflow=workflow,
+            pipeline_result=None,
+            release_result=None,
+            autonomy_decision=None,
+            completed=False,
+            waiting_for_human=False,
+            resumed=True,
+            error=error,
+        )
+
+    def progress(
+        self,
+        workflow_id: str,
+    ) -> WorkflowRecord:
+        return self.workflow_store.require(
+            workflow_id
+        )
+
+    def _execute_pre_release(
+        self,
+        workflow: WorkflowRecord,
+        commit_message: str | None,
+        resumed: bool,
+    ) -> ContinuousRunResult:
         pipeline_result: Any | None = None
-        release_result: Any | None = None
         autonomy_decision: AutonomyDecision | None = None
 
         try:
-            workflow = self.workflow_store.update(
-                workflow.workflow_id,
-                status=WorkflowStatus.PLANNING,
-                summary="Preparing autonomous development workflow.",
-                clear_error=True,
-            )
+            if workflow.status == WorkflowStatus.CREATED:
+                workflow = self.workflow_store.update(
+                    workflow.workflow_id,
+                    status=WorkflowStatus.PLANNING,
+                    summary=(
+                        "Preparing autonomous development workflow."
+                    ),
+                    clear_error=True,
+                )
 
             workflow = self.workflow_store.update(
                 workflow.workflow_id,
                 status=WorkflowStatus.EXECUTING,
                 summary=(
-                    "Running manager, worker, staging, validation, "
-                    "and review pipeline."
+                    "Running manager, worker, staging, "
+                    "validation, and review pipeline."
                 ),
+                clear_error=True,
             )
 
             pipeline_result = self.pipeline.execute(
-                cleaned_goal
+                workflow.goal
             )
 
             workflow = self.workflow_store.update(
@@ -157,7 +279,10 @@ class ContinuousOrchestrator:
                 workflow = self.workflow_store.update(
                     workflow.workflow_id,
                     status=WorkflowStatus.FAILED,
-                    summary="Pipeline did not receive manager approval.",
+                    summary=(
+                        "Pipeline did not receive "
+                        "manager approval."
+                    ),
                     error=error,
                 )
 
@@ -168,6 +293,7 @@ class ContinuousOrchestrator:
                     autonomy_decision=None,
                     completed=False,
                     waiting_for_human=False,
+                    resumed=resumed,
                     error=error,
                 )
 
@@ -205,6 +331,7 @@ class ContinuousOrchestrator:
                     autonomy_decision=autonomy_decision,
                     completed=False,
                     waiting_for_human=True,
+                    resumed=resumed,
                     error=None,
                 )
 
@@ -235,6 +362,7 @@ class ContinuousOrchestrator:
                         autonomy_decision=push_decision,
                         completed=False,
                         waiting_for_human=True,
+                        resumed=resumed,
                         error=None,
                     )
 
@@ -242,16 +370,60 @@ class ContinuousOrchestrator:
                 workflow.workflow_id,
                 status=WorkflowStatus.APPROVED,
                 summary=(
-                    "Autonomy policy approved routine development work."
+                    "Autonomy policy approved routine "
+                    "development work."
                 ),
             )
 
+            return self._execute_release(
+                workflow=workflow,
+                pipeline_result=pipeline_result,
+                autonomy_decision=autonomy_decision,
+                commit_message=commit_message,
+                resumed=resumed,
+            )
+
+        except Exception as exc:
+            error = f"{type(exc).__name__}: {exc}"
+
+            workflow = self._mark_failed_when_possible(
+                workflow.workflow_id,
+                error,
+            )
+
+            return ContinuousRunResult(
+                workflow=workflow,
+                pipeline_result=pipeline_result,
+                release_result=None,
+                autonomy_decision=autonomy_decision,
+                completed=False,
+                waiting_for_human=(
+                    workflow.status
+                    == WorkflowStatus.WAITING_APPROVAL
+                ),
+                resumed=resumed,
+                error=error,
+            )
+
+    def _execute_release(
+        self,
+        workflow: WorkflowRecord,
+        pipeline_result: Any | None,
+        autonomy_decision: AutonomyDecision | None,
+        commit_message: str | None,
+        resumed: bool,
+    ) -> ContinuousRunResult:
+        release_result: Any | None = None
+
+        try:
             workflow = self.workflow_store.update(
                 workflow.workflow_id,
                 status=WorkflowStatus.APPLYING,
                 summary=(
-                    "Applying staged changes and publishing approved work."
+                    "Applying staged changes and publishing "
+                    "approved work."
                 ),
+                clear_error=True,
             )
 
             resolved_commit_message = (
@@ -259,7 +431,7 @@ class ContinuousOrchestrator:
                 if commit_message is not None
                 and commit_message.strip()
                 else self._default_commit_message(
-                    cleaned_goal
+                    workflow.goal
                 )
             )
 
@@ -275,8 +447,12 @@ class ContinuousOrchestrator:
             if not bool(
                 getattr(release_result, "success", False)
             ):
-                error = (
-                    getattr(release_result, "error", None)
+                error = str(
+                    getattr(
+                        release_result,
+                        "error",
+                        None,
+                    )
                     or "Release coordinator failed."
                 )
 
@@ -284,7 +460,7 @@ class ContinuousOrchestrator:
                     workflow.workflow_id,
                     status=WorkflowStatus.FAILED,
                     summary="Autonomous release failed.",
-                    error=str(error),
+                    error=error,
                 )
 
                 return ContinuousRunResult(
@@ -294,7 +470,8 @@ class ContinuousOrchestrator:
                     autonomy_decision=autonomy_decision,
                     completed=False,
                     waiting_for_human=False,
-                    error=str(error),
+                    resumed=resumed,
+                    error=error,
                 )
 
             workflow = self.workflow_store.update(
@@ -315,13 +492,12 @@ class ContinuousOrchestrator:
                 autonomy_decision=autonomy_decision,
                 completed=True,
                 waiting_for_human=False,
+                resumed=resumed,
                 error=None,
             )
 
         except Exception as exc:
-            error = (
-                f"{type(exc).__name__}: {exc}"
-            )
+            error = f"{type(exc).__name__}: {exc}"
 
             workflow = self._mark_failed_when_possible(
                 workflow.workflow_id,
@@ -334,20 +510,10 @@ class ContinuousOrchestrator:
                 release_result=release_result,
                 autonomy_decision=autonomy_decision,
                 completed=False,
-                waiting_for_human=(
-                    workflow.status
-                    == WorkflowStatus.WAITING_APPROVAL
-                ),
+                waiting_for_human=False,
+                resumed=resumed,
                 error=error,
             )
-
-    def progress(
-        self,
-        workflow_id: str,
-    ) -> WorkflowRecord:
-        return self.workflow_store.require(
-            workflow_id
-        )
 
     def _mark_failed_when_possible(
         self,
@@ -358,23 +524,24 @@ class ContinuousOrchestrator:
             workflow_id
         )
 
-        if current.status in {
-            WorkflowStatus.COMPLETED,
-            WorkflowStatus.FAILED,
-            WorkflowStatus.REJECTED,
-            WorkflowStatus.STOPPED,
-            WorkflowStatus.WAITING_APPROVAL,
-        }:
+        if current.status in self.TERMINAL_STATUSES:
+            return current
+
+        if current.status == WorkflowStatus.WAITING_APPROVAL:
             return self.workflow_store.update(
                 workflow_id,
-                summary="Workflow stopped after an execution error.",
+                summary=(
+                    "Workflow is waiting for human intervention."
+                ),
                 error=error,
             )
 
         return self.workflow_store.update(
             workflow_id,
             status=WorkflowStatus.FAILED,
-            summary="Workflow failed during autonomous execution.",
+            summary=(
+                "Workflow failed during autonomous execution."
+            ),
             error=error,
         )
 
@@ -403,9 +570,10 @@ class ContinuousOrchestrator:
                     "Pipeline file change does not contain a path."
                 )
 
-            cleaned_path = str(raw_path).strip().replace(
-                "\\",
-                "/",
+            cleaned_path = (
+                str(raw_path)
+                .strip()
+                .replace("\\", "/")
             )
 
             if not cleaned_path:
@@ -503,9 +671,14 @@ class ContinuousOrchestrator:
         workflow_id: str,
         paths: list[str],
     ) -> str:
-        path_summary = "|".join(paths)
+        payload = (
+            workflow_id
+            + "|"
+            + "|".join(paths)
+        ).encode("utf-8")
 
-        return (
-            f"autonomy:{workflow_id}:"
-            f"{abs(hash(path_summary))}"
-        )
+        digest = hashlib.sha256(
+            payload
+        ).hexdigest()
+
+        return f"autonomy:{digest}"

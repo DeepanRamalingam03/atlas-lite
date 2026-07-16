@@ -18,6 +18,11 @@ from core.orchestration.models import (
     WorkflowRecord,
     WorkflowStatus,
 )
+from core.orchestration.recovery_manager import (
+    RecoveryAction,
+    RecoveryAssessment,
+    WorkflowRecoveryManager,
+)
 from core.orchestration.state_store import (
     WorkflowStateError,
     WorkflowStateStore,
@@ -33,8 +38,11 @@ __all__ = [
     "DecisionReason",
     "DevelopmentPipeline",
     "DevelopmentReleaseCoordinator",
+    "RecoveryAction",
+    "RecoveryAssessment",
     "WorkflowProgress",
     "WorkflowRecord",
+    "WorkflowRecoveryManager",
     "WorkflowStateError",
     "WorkflowStateStore",
     "WorkflowStatus",
