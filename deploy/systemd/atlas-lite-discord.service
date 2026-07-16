@@ -1,0 +1,23 @@
+[Unit]
+Description=Atlas Lite Discord Gateway
+After=network-online.target atlas-lite-runtime.service
+Wants=network-online.target
+Requires=atlas-lite-runtime.service
+
+[Service]
+Type=simple
+User=ubuntu
+Group=ubuntu
+WorkingDirectory=/home/ubuntu/atlas-lite
+EnvironmentFile=/home/ubuntu/atlas-lite/.env
+Environment=PYTHONUNBUFFERED=1
+Environment=PYTHONDONTWRITEBYTECODE=1
+ExecStart=/home/ubuntu/atlas-lite/venv/bin/python /home/ubuntu/atlas-lite/run_discord_bot.py
+Restart=always
+RestartSec=15
+TimeoutStopSec=45
+KillSignal=SIGTERM
+UMask=0077
+
+[Install]
+WantedBy=multi-user.target
