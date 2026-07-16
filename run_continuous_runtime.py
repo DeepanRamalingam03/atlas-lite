@@ -19,15 +19,16 @@ from core.orchestration.directive_runtime import (
     DirectiveAwareRuntimeService,
 )
 from core.orchestration.recovery_manager import WorkflowRecoveryManager
+from core.orchestration.retry_policy import (
+    RetryStateStore,
+    RuntimeRetryPolicy,
+)
 from core.orchestration.roadmap import (
     RoadmapTaskSelector,
     RoadmapTaskStore,
 )
 from core.orchestration.runtime_lock import RuntimeProcessLock
-from core.orchestration.runtime_service import (
-    ContinuousRuntimeService,
-    RuntimeCycleResult,
-)
+from core.orchestration.runtime_service import RuntimeCycleResult
 from core.orchestration.state_store import WorkflowStateStore
 from git_tools.engine import GitEngine
 from managers.openai_manager import OpenAIManager
@@ -94,6 +95,24 @@ def non_negative_float(
     if value < 0:
         raise RuntimeError(
             f"{name} cannot be negative."
+        )
+
+    return value
+
+
+def minimum_float(
+    name: str,
+    default: float,
+    minimum: float,
+) -> float:
+    value = non_negative_float(
+        name,
+        default,
+    )
+
+    if value < minimum:
+        raise RuntimeError(
+            f"{name} must be at least {minimum}."
         )
 
     return value
@@ -246,6 +265,33 @@ def build_runtime_service() -> DirectiveAwareRuntimeService:
         roadmap_store=roadmap_store,
     )
 
+    retry_policy = RuntimeRetryPolicy(
+        state_store=RetryStateStore(
+            DATA_ROOT / "runtime_retries.json"
+        ),
+        max_attempts=positive_integer(
+            "ATLAS_RUNTIME_MAX_ATTEMPTS",
+            4,
+        ),
+        initial_delay_seconds=(
+            non_negative_float(
+                "ATLAS_RUNTIME_RETRY_INITIAL_SECONDS",
+                30.0,
+            )
+        ),
+        multiplier=minimum_float(
+            "ATLAS_RUNTIME_RETRY_MULTIPLIER",
+            2.0,
+            1.0,
+        ),
+        max_delay_seconds=(
+            non_negative_float(
+                "ATLAS_RUNTIME_RETRY_MAX_SECONDS",
+                900.0,
+            )
+        ),
+    )
+
     return DirectiveAwareRuntimeService(
         roadmap_store=roadmap_store,
         roadmap_selector=RoadmapTaskSelector(
@@ -256,6 +302,7 @@ def build_runtime_service() -> DirectiveAwareRuntimeService:
         process_lock=RuntimeProcessLock(
             DATA_ROOT / "continuous_orchestrator.lock"
         ),
+        retry_policy=retry_policy,
         user_id=positive_integer(
             "ATLAS_RUNTIME_USER_ID",
             1,

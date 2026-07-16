@@ -14,6 +14,10 @@ from core.orchestration.continuous_loop import (
 from core.orchestration.recovery_manager import (
     WorkflowRecoveryManager,
 )
+from core.orchestration.retry_policy import (
+    FailureClass,
+    RuntimeRetryPolicy,
+)
 from core.orchestration.roadmap import (
     RoadmapSelection,
     RoadmapTask,
@@ -30,6 +34,7 @@ class RuntimeCycleStatus(str, Enum):
     IDLE = "idle"
     COMPLETED = "completed"
     WAITING_FOR_HUMAN = "waiting_for_human"
+    RETRY_SCHEDULED = "retry_scheduled"
     FAILED = "failed"
 
 
@@ -50,11 +55,11 @@ class ContinuousRuntimeService:
     Runtime flow:
     1. Acquire the single-instance process lock.
     2. Resume an interrupted RUNNING roadmap task when present.
-    3. Otherwise select the highest-priority ready roadmap task.
-    4. Execute or recover its deterministic workflow.
-    5. Persist roadmap completion, failure, or human blocker state.
-    6. Sleep and repeat.
-    7. Stop when requested without inventing new work.
+    3. Respect persisted retry backoff before rerunning failed work.
+    4. Otherwise select the highest-priority ready roadmap task.
+    5. Execute or recover its deterministic workflow.
+    6. Persist completion, retry, failure, or human blocker state.
+    7. Sleep and repeat without inventing new work.
     """
 
     def __init__(
@@ -65,6 +70,7 @@ class ContinuousRuntimeService:
         recovery_manager: WorkflowRecoveryManager,
         *,
         process_lock: RuntimeProcessLock | None = None,
+        retry_policy: RuntimeRetryPolicy | None = None,
         user_id: int = 1,
         idle_seconds: float = 30.0,
         sleep_function: Callable[[float], None] = time.sleep,
@@ -84,6 +90,12 @@ class ContinuousRuntimeService:
         self.process_lock = (
             process_lock or RuntimeProcessLock()
         )
+        self.retry_policy = (
+            retry_policy
+            or RuntimeRetryPolicy(
+                max_attempts=1
+            )
+        )
         self.user_id = user_id
         self.idle_seconds = idle_seconds
         self.sleep_function = sleep_function
@@ -102,8 +114,39 @@ class ContinuousRuntimeService:
             )
 
         if running_tasks:
+            task = running_tasks[0]
+
+            if not self.retry_policy.is_ready(
+                task.task_id
+            ):
+                remaining = (
+                    self.retry_policy
+                    .seconds_until_ready(task.task_id)
+                )
+
+                return RuntimeCycleResult(
+                    status=(
+                        RuntimeCycleStatus
+                        .RETRY_SCHEDULED
+                    ),
+                    roadmap_selection=None,
+                    roadmap_task=task,
+                    workflow_result=None,
+                    resumed=True,
+                    message=(
+                        "Retry backoff active for task "
+                        f"`{task.task_id}`. "
+                        f"Next attempt in "
+                        f"{remaining:.1f} second(s)."
+                    ),
+                )
+
+            self._prepare_retry_workflow(
+                task
+            )
+
             return self._execute_task(
-                task=running_tasks[0],
+                task=task,
                 selection=None,
                 resumed=True,
             )
@@ -201,6 +244,10 @@ class ContinuousRuntimeService:
                 )
 
             if workflow_result.completed:
+                self.retry_policy.clear_success(
+                    task.task_id
+                )
+
                 completed_task = (
                     self.roadmap_store.update_status(
                         task.task_id,
@@ -259,50 +306,156 @@ class ContinuousRuntimeService:
                 or "Atlas workflow failed."
             )
 
-            failed_task = (
+            return self._handle_failure(
+                task=task,
+                selection=selection,
+                workflow_result=workflow_result,
+                resumed=(
+                    resumed
+                    or workflow_result.resumed
+                ),
+                failure_reason=failure_reason,
+            )
+
+        except Exception as exc:
+            return self._handle_failure(
+                task=task,
+                selection=selection,
+                workflow_result=None,
+                resumed=resumed,
+                failure_reason=(
+                    f"{type(exc).__name__}: {exc}"
+                ),
+            )
+
+    def _handle_failure(
+        self,
+        *,
+        task: RoadmapTask,
+        selection: RoadmapSelection | None,
+        workflow_result: ContinuousRunResult | None,
+        resumed: bool,
+        failure_reason: str,
+    ) -> RuntimeCycleResult:
+        decision = (
+            self.retry_policy.register_failure(
+                task.task_id,
+                failure_reason,
+            )
+        )
+
+        if (
+            decision.classification.failure_class
+            == FailureClass.HUMAN_BLOCKER
+        ):
+            blocked_task = (
+                self.roadmap_store.update_status(
+                    task.task_id,
+                    RoadmapTaskStatus.BLOCKED,
+                    blocker_reason=failure_reason,
+                )
+            )
+
+            return RuntimeCycleResult(
+                status=(
+                    RuntimeCycleStatus
+                    .WAITING_FOR_HUMAN
+                ),
+                roadmap_selection=selection,
+                roadmap_task=blocked_task,
+                workflow_result=workflow_result,
+                resumed=resumed,
+                message=failure_reason,
+            )
+
+        if decision.retry:
+            current_task = (
+                self.roadmap_store.require(
+                    task.task_id
+                )
+            )
+
+            return RuntimeCycleResult(
+                status=(
+                    RuntimeCycleStatus
+                    .RETRY_SCHEDULED
+                ),
+                roadmap_selection=selection,
+                roadmap_task=current_task,
+                workflow_result=workflow_result,
+                resumed=resumed,
+                message=(
+                    f"{decision.message} "
+                    f"Attempt "
+                    f"{decision.attempt_count}/"
+                    f"{self.retry_policy.max_attempts}. "
+                    f"Failure: {failure_reason}"
+                ),
+            )
+
+        current_task = self.roadmap_store.require(
+            task.task_id
+        )
+
+        if (
+            current_task.status
+            == RoadmapTaskStatus.RUNNING
+        ):
+            current_task = (
                 self.roadmap_store.update_status(
                     task.task_id,
                     RoadmapTaskStatus.FAILED,
                 )
             )
 
-            return RuntimeCycleResult(
-                status=RuntimeCycleStatus.FAILED,
-                roadmap_selection=selection,
-                roadmap_task=failed_task,
-                workflow_result=workflow_result,
-                resumed=(
-                    resumed
-                    or workflow_result.resumed
-                ),
-                message=failure_reason,
-            )
+        return RuntimeCycleResult(
+            status=RuntimeCycleStatus.FAILED,
+            roadmap_selection=selection,
+            roadmap_task=current_task,
+            workflow_result=workflow_result,
+            resumed=resumed,
+            message=(
+                f"{decision.message} "
+                f"Failure: {failure_reason}"
+            ),
+        )
 
-        except Exception as exc:
-            current_task = self.roadmap_store.require(
+    def _prepare_retry_workflow(
+        self,
+        task: RoadmapTask,
+    ) -> None:
+        retry_state = (
+            self.retry_policy.state_store.load(
                 task.task_id
             )
+        )
 
-            if (
-                current_task.status
-                == RoadmapTaskStatus.RUNNING
-            ):
-                current_task = (
-                    self.roadmap_store.update_status(
-                        task.task_id,
-                        RoadmapTaskStatus.FAILED,
-                    )
-                )
+        if (
+            retry_state is None
+            or retry_state.attempt_count < 1
+        ):
+            return
 
-            return RuntimeCycleResult(
-                status=RuntimeCycleStatus.FAILED,
-                roadmap_selection=selection,
-                roadmap_task=current_task,
-                workflow_result=None,
-                resumed=resumed,
-                message=(
-                    f"{type(exc).__name__}: {exc}"
-                ),
+        workflow_id = self._workflow_id(
+            task.task_id
+        )
+
+        workflow = (
+            self.orchestrator.workflow_store.load(
+                workflow_id
+            )
+        )
+
+        if workflow is None:
+            return
+
+        if workflow.status.value in {
+            "failed",
+            "rejected",
+            "stopped",
+        }:
+            self.orchestrator.workflow_store.delete(
+                workflow_id
             )
 
     @staticmethod
