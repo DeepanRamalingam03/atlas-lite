@@ -36,6 +36,11 @@ from core.orchestration.runtime_lock import (
     RuntimeLockOwner,
     RuntimeProcessLock,
 )
+from core.orchestration.runtime_service import (
+    ContinuousRuntimeService,
+    RuntimeCycleResult,
+    RuntimeCycleStatus,
+)
 from core.orchestration.state_store import (
     WorkflowStateError,
     WorkflowStateStore,
@@ -48,6 +53,7 @@ __all__ = [
     "AutonomyRequest",
     "ContinuousOrchestrator",
     "ContinuousRunResult",
+    "ContinuousRuntimeService",
     "DecisionReason",
     "DevelopmentPipeline",
     "DevelopmentReleaseCoordinator",
@@ -59,6 +65,8 @@ __all__ = [
     "RoadmapTaskSelector",
     "RoadmapTaskStatus",
     "RoadmapTaskStore",
+    "RuntimeCycleResult",
+    "RuntimeCycleStatus",
     "RuntimeLockError",
     "RuntimeLockOwner",
     "RuntimeProcessLock",
