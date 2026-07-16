@@ -13,6 +13,17 @@ from core.orchestration.continuous_loop import (
     DevelopmentPipeline,
     DevelopmentReleaseCoordinator,
 )
+from core.orchestration.directive_importer import (
+    ArchitectDirective,
+    ArchitectDirectiveStatus,
+    ArchitectDirectiveStore,
+    ArchitectDirectiveStoreError,
+    DirectiveImportResult,
+    RoadmapDirectiveImporter,
+)
+from core.orchestration.directive_runtime import (
+    DirectiveAwareRuntimeService,
+)
 from core.orchestration.models import (
     WorkflowProgress,
     WorkflowRecord,
@@ -47,6 +58,10 @@ from core.orchestration.state_store import (
 )
 
 __all__ = [
+    "ArchitectDirective",
+    "ArchitectDirectiveStatus",
+    "ArchitectDirectiveStore",
+    "ArchitectDirectiveStoreError",
     "AutonomyAction",
     "AutonomyDecision",
     "AutonomyPolicy",
@@ -57,8 +72,11 @@ __all__ = [
     "DecisionReason",
     "DevelopmentPipeline",
     "DevelopmentReleaseCoordinator",
+    "DirectiveAwareRuntimeService",
+    "DirectiveImportResult",
     "RecoveryAction",
     "RecoveryAssessment",
+    "RoadmapDirectiveImporter",
     "RoadmapSelection",
     "RoadmapStoreError",
     "RoadmapTask",

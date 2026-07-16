@@ -11,6 +11,13 @@ from apply.engine import TransactionalApplyEngine
 from clients.factory import ClientFactory
 from core.orchestration.autonomy_policy import AutonomyPolicy
 from core.orchestration.continuous_loop import ContinuousOrchestrator
+from core.orchestration.directive_importer import (
+    ArchitectDirectiveStore,
+    RoadmapDirectiveImporter,
+)
+from core.orchestration.directive_runtime import (
+    DirectiveAwareRuntimeService,
+)
 from core.orchestration.recovery_manager import WorkflowRecoveryManager
 from core.orchestration.roadmap import (
     RoadmapTaskSelector,
@@ -172,7 +179,7 @@ def build_release_coordinator() -> ReleaseCoordinator:
     )
 
 
-def build_runtime_service() -> ContinuousRuntimeService:
+def build_runtime_service() -> DirectiveAwareRuntimeService:
     DATA_ROOT.mkdir(
         parents=True,
         exist_ok=True,
@@ -228,7 +235,18 @@ def build_runtime_service() -> ContinuousRuntimeService:
         workflow_store=workflow_store,
     )
 
-    return ContinuousRuntimeService(
+    directive_store = ArchitectDirectiveStore(
+        storage_path=(
+            DATA_ROOT / "architect_directives.json"
+        ),
+    )
+
+    directive_importer = RoadmapDirectiveImporter(
+        directive_store=directive_store,
+        roadmap_store=roadmap_store,
+    )
+
+    return DirectiveAwareRuntimeService(
         roadmap_store=roadmap_store,
         roadmap_selector=RoadmapTaskSelector(
             roadmap_store
@@ -246,6 +264,7 @@ def build_runtime_service() -> ContinuousRuntimeService:
             "ATLAS_RUNTIME_IDLE_SECONDS",
             30.0,
         ),
+        directive_importer=directive_importer,
     )
 
 
