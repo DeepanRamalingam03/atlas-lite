@@ -7,6 +7,12 @@ from core.orchestration.autonomy_policy import (
     AutonomyRequest,
     DecisionReason,
 )
+from core.orchestration.continuous_loop import (
+    ContinuousOrchestrator,
+    ContinuousRunResult,
+    DevelopmentPipeline,
+    DevelopmentReleaseCoordinator,
+)
 from core.orchestration.models import (
     WorkflowProgress,
     WorkflowRecord,
@@ -22,7 +28,11 @@ __all__ = [
     "AutonomyDecision",
     "AutonomyPolicy",
     "AutonomyRequest",
+    "ContinuousOrchestrator",
+    "ContinuousRunResult",
     "DecisionReason",
+    "DevelopmentPipeline",
+    "DevelopmentReleaseCoordinator",
     "WorkflowProgress",
     "WorkflowRecord",
     "WorkflowStateError",
