@@ -9,8 +9,12 @@ from threading import Event
 import config
 from apply.engine import TransactionalApplyEngine
 from clients.factory import ClientFactory
-from core.orchestration.autonomy_policy import AutonomyPolicy
-from core.orchestration.continuous_loop import ContinuousOrchestrator
+from core.orchestration.autonomy_policy import (
+    AutonomyPolicy,
+)
+from core.orchestration.continuous_loop import (
+    ContinuousOrchestrator,
+)
 from core.orchestration.directive_importer import (
     ArchitectDirectiveStore,
     RoadmapDirectiveImporter,
@@ -18,7 +22,15 @@ from core.orchestration.directive_importer import (
 from core.orchestration.directive_runtime import (
     DirectiveAwareRuntimeService,
 )
-from core.orchestration.recovery_manager import WorkflowRecoveryManager
+from core.orchestration.observability import (
+    RuntimeAlertStore,
+    RuntimeDiskCleaner,
+    RuntimeHeartbeatStore,
+    RuntimeObserver,
+)
+from core.orchestration.recovery_manager import (
+    WorkflowRecoveryManager,
+)
 from core.orchestration.retry_policy import (
     RetryStateStore,
     RuntimeRetryPolicy,
@@ -27,16 +39,24 @@ from core.orchestration.roadmap import (
     RoadmapTaskSelector,
     RoadmapTaskStore,
 )
-from core.orchestration.runtime_lock import RuntimeProcessLock
-from core.orchestration.runtime_service import RuntimeCycleResult
-from core.orchestration.state_store import WorkflowStateStore
+from core.orchestration.runtime_lock import (
+    RuntimeProcessLock,
+)
+from core.orchestration.runtime_service import (
+    RuntimeCycleResult,
+)
+from core.orchestration.state_store import (
+    WorkflowStateStore,
+)
 from git_tools.engine import GitEngine
 from managers.openai_manager import OpenAIManager
 from orchestrator.pipeline import AtlasPipeline
 from release.coordinator import ReleaseCoordinator
 from services.prompt_builder import PromptBuilder
 from services.review_parser import ReviewParser
-from services.worker_output_parser import WorkerOutputParser
+from services.worker_output_parser import (
+    WorkerOutputParser,
+)
 from testing.runner import StagingTestRunner
 from utils.logger import setup_logger
 from workers.gemini_worker import GeminiWorker
@@ -48,6 +68,7 @@ PROJECT_ROOT = Path(__file__).resolve().parent
 STAGING_ROOT = PROJECT_ROOT / ".atlas_staging"
 DATA_ROOT = PROJECT_ROOT / ".atlas_data"
 BACKUP_ROOT = PROJECT_ROOT / ".atlas_apply_backup"
+VALIDATION_ROOT = PROJECT_ROOT / ".atlas_validation"
 
 logger = logging.getLogger(__name__)
 
@@ -112,7 +133,8 @@ def minimum_float(
 
     if value < minimum:
         raise RuntimeError(
-            f"{name} must be at least {minimum}."
+            f"{name} must be at least "
+            f"{minimum}."
         )
 
     return value
@@ -153,10 +175,14 @@ def boolean_setting(
 def build_pipeline() -> AtlasPipeline:
     return AtlasPipeline(
         manager=OpenAIManager(
-            client=ClientFactory.create("openai"),
+            client=ClientFactory.create(
+                "openai"
+            ),
         ),
         worker=GeminiWorker(
-            client=ClientFactory.create("gemini"),
+            client=ClientFactory.create(
+                "gemini"
+            ),
         ),
         prompt_builder=PromptBuilder(),
         parser=WorkerOutputParser(),
@@ -166,16 +192,23 @@ def build_pipeline() -> AtlasPipeline:
         ),
         test_runner=StagingTestRunner(
             staging_root=STAGING_ROOT,
-            timeout_seconds=config.CLIENT_TIMEOUT,
+            timeout_seconds=(
+                config.CLIENT_TIMEOUT
+            ),
         ),
-        max_iterations=config.MAX_REVIEW_ITERATIONS,
+        max_iterations=(
+            config.MAX_REVIEW_ITERATIONS
+        ),
     )
 
 
-def build_release_coordinator() -> ReleaseCoordinator:
+def build_release_coordinator(
+) -> ReleaseCoordinator:
     git_engine = GitEngine(
         repository_root=PROJECT_ROOT,
-        timeout_seconds=config.CLIENT_TIMEOUT,
+        timeout_seconds=(
+            config.CLIENT_TIMEOUT
+        ),
     )
 
     diff_engine = WorkspaceDiffEngine(
@@ -183,10 +216,12 @@ def build_release_coordinator() -> ReleaseCoordinator:
         staging_root=STAGING_ROOT,
     )
 
-    apply_engine = TransactionalApplyEngine(
-        project_root=PROJECT_ROOT,
-        staging_root=STAGING_ROOT,
-        backup_root=BACKUP_ROOT,
+    apply_engine = (
+        TransactionalApplyEngine(
+            project_root=PROJECT_ROOT,
+            staging_root=STAGING_ROOT,
+            backup_root=BACKUP_ROOT,
+        )
     )
 
     return ReleaseCoordinator(
@@ -198,19 +233,62 @@ def build_release_coordinator() -> ReleaseCoordinator:
     )
 
 
-def build_runtime_service() -> DirectiveAwareRuntimeService:
+def build_runtime_observer(
+) -> RuntimeObserver:
+    return RuntimeObserver(
+        heartbeat_store=(
+            RuntimeHeartbeatStore(
+                DATA_ROOT
+                / "runtime_heartbeat.json"
+            )
+        ),
+        alert_store=RuntimeAlertStore(
+            DATA_ROOT / "runtime_alerts.json",
+            max_alerts=positive_integer(
+                "ATLAS_RUNTIME_MAX_ALERTS",
+                200,
+            ),
+        ),
+        disk_cleaner=RuntimeDiskCleaner(
+            roots=(
+                BACKUP_ROOT,
+                VALIDATION_ROOT,
+            ),
+            minimum_age_seconds=(
+                non_negative_float(
+                    "ATLAS_RUNTIME_CLEANUP_AGE_SECONDS",
+                    86400.0,
+                )
+            ),
+        ),
+        cleanup_interval_cycles=(
+            positive_integer(
+                "ATLAS_RUNTIME_CLEANUP_INTERVAL_CYCLES",
+                120,
+            )
+        ),
+    )
+
+
+def build_runtime_service(
+    *,
+    observer: RuntimeObserver | None = None,
+) -> DirectiveAwareRuntimeService:
     DATA_ROOT.mkdir(
         parents=True,
         exist_ok=True,
     )
 
     roadmap_store = RoadmapTaskStore(
-        storage_path=DATA_ROOT / "roadmap_tasks.json",
+        storage_path=(
+            DATA_ROOT / "roadmap_tasks.json"
+        ),
     )
 
     workflow_store = WorkflowStateStore(
         storage_path=(
-            DATA_ROOT / "orchestration_workflows.json"
+            DATA_ROOT
+            / "orchestration_workflows.json"
         ),
     )
 
@@ -226,20 +304,26 @@ def build_runtime_service() -> DirectiveAwareRuntimeService:
 
     if not branch:
         raise RuntimeError(
-            "ATLAS_RUNTIME_BRANCH cannot be empty."
+            "ATLAS_RUNTIME_BRANCH "
+            "cannot be empty."
         )
 
     if not remote:
         raise RuntimeError(
-            "ATLAS_RUNTIME_REMOTE cannot be empty."
+            "ATLAS_RUNTIME_REMOTE "
+            "cannot be empty."
         )
 
     orchestrator = ContinuousOrchestrator(
         pipeline=build_pipeline(),
-        release_coordinator=build_release_coordinator(),
+        release_coordinator=(
+            build_release_coordinator()
+        ),
         workflow_store=workflow_store,
         autonomy_policy=AutonomyPolicy(
-            development_branches={branch},
+            development_branches={
+                branch,
+            },
         ),
         remote=remote,
         branch=branch,
@@ -249,25 +333,33 @@ def build_runtime_service() -> DirectiveAwareRuntimeService:
         ),
     )
 
-    recovery_manager = WorkflowRecoveryManager(
-        orchestrator=orchestrator,
-        workflow_store=workflow_store,
+    recovery_manager = (
+        WorkflowRecoveryManager(
+            orchestrator=orchestrator,
+            workflow_store=workflow_store,
+        )
     )
 
-    directive_store = ArchitectDirectiveStore(
-        storage_path=(
-            DATA_ROOT / "architect_directives.json"
-        ),
+    directive_store = (
+        ArchitectDirectiveStore(
+            storage_path=(
+                DATA_ROOT
+                / "architect_directives.json"
+            ),
+        )
     )
 
-    directive_importer = RoadmapDirectiveImporter(
-        directive_store=directive_store,
-        roadmap_store=roadmap_store,
+    directive_importer = (
+        RoadmapDirectiveImporter(
+            directive_store=directive_store,
+            roadmap_store=roadmap_store,
+        )
     )
 
     retry_policy = RuntimeRetryPolicy(
         state_store=RetryStateStore(
-            DATA_ROOT / "runtime_retries.json"
+            DATA_ROOT
+            / "runtime_retries.json"
         ),
         max_attempts=positive_integer(
             "ATLAS_RUNTIME_MAX_ATTEMPTS",
@@ -294,24 +386,40 @@ def build_runtime_service() -> DirectiveAwareRuntimeService:
 
     return DirectiveAwareRuntimeService(
         roadmap_store=roadmap_store,
-        roadmap_selector=RoadmapTaskSelector(
-            roadmap_store
+        roadmap_selector=(
+            RoadmapTaskSelector(
+                roadmap_store
+            )
         ),
         orchestrator=orchestrator,
         recovery_manager=recovery_manager,
         process_lock=RuntimeProcessLock(
-            DATA_ROOT / "continuous_orchestrator.lock"
+            DATA_ROOT
+            / "continuous_orchestrator.lock"
         ),
         retry_policy=retry_policy,
         user_id=positive_integer(
             "ATLAS_RUNTIME_USER_ID",
             1,
         ),
-        idle_seconds=non_negative_float(
-            "ATLAS_RUNTIME_IDLE_SECONDS",
-            30.0,
+        idle_seconds=(
+            non_negative_float(
+                "ATLAS_RUNTIME_IDLE_SECONDS",
+                30.0,
+            )
         ),
-        directive_importer=directive_importer,
+        directive_importer=(
+            directive_importer
+        ),
+        cycle_callback=(
+            observer.handle_cycle
+            if observer is not None
+            else None
+        ),
+        history_limit=positive_integer(
+            "ATLAS_RUNTIME_HISTORY_LIMIT",
+            100,
+        ),
     )
 
 
@@ -320,12 +428,15 @@ def log_cycle(
 ) -> None:
     task_id = (
         result.roadmap_task.task_id
-        if result.roadmap_task is not None
+        if result.roadmap_task
+        is not None
         else "none"
     )
 
     logger.info(
-        "Runtime cycle status=%s task=%s resumed=%s message=%s",
+        "Runtime cycle "
+        "status=%s task=%s "
+        "resumed=%s message=%s",
         result.status.value,
         task_id,
         result.resumed,
@@ -334,9 +445,12 @@ def log_cycle(
 
 
 def main() -> None:
-    setup_logger("atlas-lite.runtime")
+    setup_logger(
+        "atlas-lite.runtime"
+    )
 
     stop_event = Event()
+    observer = build_runtime_observer()
 
     def request_stop(
         signum: int,
@@ -357,22 +471,26 @@ def main() -> None:
         request_stop,
     )
 
-    service = build_runtime_service()
+    service = build_runtime_service(
+        observer=observer
+    )
+
+    observer.mark_started()
 
     logger.info(
         "Atlas continuous runtime starting."
     )
 
-    results = service.run_forever(
-        stop_event=stop_event,
-    )
+    try:
+        service.run_forever(
+            stop_event=stop_event,
+        )
+    finally:
+        observer.mark_stopped()
 
-    for result in results[-10:]:
-        log_cycle(result)
-
-    logger.info(
-        "Atlas continuous runtime stopped."
-    )
+        logger.info(
+            "Atlas continuous runtime stopped."
+        )
 
 
 if __name__ == "__main__":
