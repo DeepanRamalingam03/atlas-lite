@@ -60,3 +60,4 @@ __pycache__/
 .atlas_staging/
 .atlas_validation/
 .atlas_apply_backup/
+.atlas_workflow_state_test/
