@@ -4,14 +4,24 @@ import os
 import unittest
 from unittest.mock import patch
 
-from apply.engine import TransactionalApplyEngine
-from core.orchestration.runtime_service import ContinuousRuntimeService
-from release.coordinator import ReleaseCoordinator
+from apply.engine import (
+    TransactionalApplyEngine,
+)
+from core.orchestration.production_guard import (
+    LockedReleaseCoordinator,
+)
+from core.orchestration.runtime_service import (
+    ContinuousRuntimeService,
+)
+from release.coordinator import (
+    ReleaseCoordinator,
+)
 from run_continuous_runtime import (
     BACKUP_ROOT,
     PROJECT_ROOT,
     STAGING_ROOT,
     boolean_setting,
+    build_base_release_coordinator,
     build_release_coordinator,
     non_negative_float,
     positive_integer,
@@ -102,7 +112,9 @@ class ContinuousRuntimeEntrypointTest(
             "yes",
             "on",
         ):
-            with self.subTest(value=value):
+            with self.subTest(
+                value=value
+            ):
                 with patch.dict(
                     os.environ,
                     {
@@ -122,7 +134,9 @@ class ContinuousRuntimeEntrypointTest(
             "no",
             "off",
         ):
-            with self.subTest(value=value):
+            with self.subTest(
+                value=value
+            ):
                 with patch.dict(
                     os.environ,
                     {
@@ -136,10 +150,12 @@ class ContinuousRuntimeEntrypointTest(
                         )
                     )
 
-    def test_release_coordinator_builds(
+    def test_base_release_coordinator_builds(
         self,
     ) -> None:
-        coordinator = build_release_coordinator()
+        coordinator = (
+            build_base_release_coordinator()
+        )
 
         self.assertIsInstance(
             coordinator,
@@ -174,6 +190,34 @@ class ContinuousRuntimeEntrypointTest(
         self.assertEqual(
             coordinator.apply_engine.backup_root,
             BACKUP_ROOT.resolve(),
+        )
+
+    def test_guarded_release_coordinator_builds(
+        self,
+    ) -> None:
+        coordinator = (
+            build_release_coordinator(
+                branch="main"
+            )
+        )
+
+        self.assertIsInstance(
+            coordinator,
+            LockedReleaseCoordinator,
+        )
+
+        self.assertIsInstance(
+            coordinator.delegate,
+            ReleaseCoordinator,
+        )
+
+        self.assertEqual(
+            coordinator.preflight.expected_branch,
+            "main",
+        )
+
+        self.assertFalse(
+            coordinator.operation_lock.acquired
         )
 
     def test_runtime_service_type_available(

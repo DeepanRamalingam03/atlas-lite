@@ -28,6 +28,12 @@ from core.orchestration.observability import (
     RuntimeHeartbeatStore,
     RuntimeObserver,
 )
+from core.orchestration.production_guard import (
+    DiskPressureGuard,
+    LockedReleaseCoordinator,
+    ProductionPreflight,
+    RepositoryOperationLock,
+)
 from core.orchestration.recovery_manager import (
     WorkflowRecoveryManager,
 )
@@ -133,8 +139,7 @@ def minimum_float(
 
     if value < minimum:
         raise RuntimeError(
-            f"{name} must be at least "
-            f"{minimum}."
+            f"{name} must be at least {minimum}."
         )
 
     return value
@@ -192,9 +197,7 @@ def build_pipeline() -> AtlasPipeline:
         ),
         test_runner=StagingTestRunner(
             staging_root=STAGING_ROOT,
-            timeout_seconds=(
-                config.CLIENT_TIMEOUT
-            ),
+            timeout_seconds=config.CLIENT_TIMEOUT,
         ),
         max_iterations=(
             config.MAX_REVIEW_ITERATIONS
@@ -202,13 +205,11 @@ def build_pipeline() -> AtlasPipeline:
     )
 
 
-def build_release_coordinator(
+def build_base_release_coordinator(
 ) -> ReleaseCoordinator:
     git_engine = GitEngine(
         repository_root=PROJECT_ROOT,
-        timeout_seconds=(
-            config.CLIENT_TIMEOUT
-        ),
+        timeout_seconds=config.CLIENT_TIMEOUT,
     )
 
     diff_engine = WorkspaceDiffEngine(
@@ -216,12 +217,10 @@ def build_release_coordinator(
         staging_root=STAGING_ROOT,
     )
 
-    apply_engine = (
-        TransactionalApplyEngine(
-            project_root=PROJECT_ROOT,
-            staging_root=STAGING_ROOT,
-            backup_root=BACKUP_ROOT,
-        )
+    apply_engine = TransactionalApplyEngine(
+        project_root=PROJECT_ROOT,
+        staging_root=STAGING_ROOT,
+        backup_root=BACKUP_ROOT,
     )
 
     return ReleaseCoordinator(
@@ -233,14 +232,74 @@ def build_release_coordinator(
     )
 
 
+def build_release_coordinator(
+    *,
+    branch: str = "main",
+) -> LockedReleaseCoordinator:
+    cleaned_branch = branch.strip()
+
+    if not cleaned_branch:
+        raise RuntimeError(
+            "Release branch cannot be empty."
+        )
+
+    minimum_free_megabytes = (
+        positive_integer(
+            "ATLAS_MINIMUM_FREE_DISK_MB",
+            256,
+        )
+    )
+
+    minimum_free_percent = (
+        non_negative_float(
+            "ATLAS_MINIMUM_FREE_DISK_PERCENT",
+            5.0,
+        )
+    )
+
+    if minimum_free_percent > 100:
+        raise RuntimeError(
+            "ATLAS_MINIMUM_FREE_DISK_PERCENT "
+            "cannot exceed 100."
+        )
+
+    delegate = (
+        build_base_release_coordinator()
+    )
+
+    return LockedReleaseCoordinator(
+        delegate=delegate,
+        operation_lock=(
+            RepositoryOperationLock(
+                DATA_ROOT
+                / "repository_release.lock",
+                operation="apply-commit-push",
+            )
+        ),
+        preflight=ProductionPreflight(
+            repository_root=PROJECT_ROOT,
+            disk_guard=DiskPressureGuard(
+                PROJECT_ROOT,
+                minimum_free_bytes=(
+                    minimum_free_megabytes
+                    * 1024
+                    * 1024
+                ),
+                minimum_free_percent=(
+                    minimum_free_percent
+                ),
+            ),
+            expected_branch=cleaned_branch,
+        ),
+    )
+
+
 def build_runtime_observer(
 ) -> RuntimeObserver:
     return RuntimeObserver(
-        heartbeat_store=(
-            RuntimeHeartbeatStore(
-                DATA_ROOT
-                / "runtime_heartbeat.json"
-            )
+        heartbeat_store=RuntimeHeartbeatStore(
+            DATA_ROOT
+            / "runtime_heartbeat.json"
         ),
         alert_store=RuntimeAlertStore(
             DATA_ROOT / "runtime_alerts.json",
@@ -304,20 +363,20 @@ def build_runtime_service(
 
     if not branch:
         raise RuntimeError(
-            "ATLAS_RUNTIME_BRANCH "
-            "cannot be empty."
+            "ATLAS_RUNTIME_BRANCH cannot be empty."
         )
 
     if not remote:
         raise RuntimeError(
-            "ATLAS_RUNTIME_REMOTE "
-            "cannot be empty."
+            "ATLAS_RUNTIME_REMOTE cannot be empty."
         )
 
     orchestrator = ContinuousOrchestrator(
         pipeline=build_pipeline(),
         release_coordinator=(
-            build_release_coordinator()
+            build_release_coordinator(
+                branch=branch
+            )
         ),
         workflow_store=workflow_store,
         autonomy_policy=AutonomyPolicy(
@@ -333,33 +392,26 @@ def build_runtime_service(
         ),
     )
 
-    recovery_manager = (
-        WorkflowRecoveryManager(
-            orchestrator=orchestrator,
-            workflow_store=workflow_store,
-        )
+    recovery_manager = WorkflowRecoveryManager(
+        orchestrator=orchestrator,
+        workflow_store=workflow_store,
     )
 
-    directive_store = (
-        ArchitectDirectiveStore(
-            storage_path=(
-                DATA_ROOT
-                / "architect_directives.json"
-            ),
-        )
+    directive_store = ArchitectDirectiveStore(
+        storage_path=(
+            DATA_ROOT
+            / "architect_directives.json"
+        ),
     )
 
-    directive_importer = (
-        RoadmapDirectiveImporter(
-            directive_store=directive_store,
-            roadmap_store=roadmap_store,
-        )
+    directive_importer = RoadmapDirectiveImporter(
+        directive_store=directive_store,
+        roadmap_store=roadmap_store,
     )
 
     retry_policy = RuntimeRetryPolicy(
         state_store=RetryStateStore(
-            DATA_ROOT
-            / "runtime_retries.json"
+            DATA_ROOT / "runtime_retries.json"
         ),
         max_attempts=positive_integer(
             "ATLAS_RUNTIME_MAX_ATTEMPTS",
@@ -386,10 +438,8 @@ def build_runtime_service(
 
     return DirectiveAwareRuntimeService(
         roadmap_store=roadmap_store,
-        roadmap_selector=(
-            RoadmapTaskSelector(
-                roadmap_store
-            )
+        roadmap_selector=RoadmapTaskSelector(
+            roadmap_store
         ),
         orchestrator=orchestrator,
         recovery_manager=recovery_manager,
@@ -402,15 +452,11 @@ def build_runtime_service(
             "ATLAS_RUNTIME_USER_ID",
             1,
         ),
-        idle_seconds=(
-            non_negative_float(
-                "ATLAS_RUNTIME_IDLE_SECONDS",
-                30.0,
-            )
+        idle_seconds=non_negative_float(
+            "ATLAS_RUNTIME_IDLE_SECONDS",
+            30.0,
         ),
-        directive_importer=(
-            directive_importer
-        ),
+        directive_importer=directive_importer,
         cycle_callback=(
             observer.handle_cycle
             if observer is not None
@@ -428,8 +474,7 @@ def log_cycle(
 ) -> None:
     task_id = (
         result.roadmap_task.task_id
-        if result.roadmap_task
-        is not None
+        if result.roadmap_task is not None
         else "none"
     )
 
@@ -466,6 +511,7 @@ def main() -> None:
         signal.SIGTERM,
         request_stop,
     )
+
     signal.signal(
         signal.SIGINT,
         request_stop,
