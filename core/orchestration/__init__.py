@@ -1,5 +1,12 @@
 from __future__ import annotations
 
+from core.orchestration.autonomy_policy import (
+    AutonomyAction,
+    AutonomyDecision,
+    AutonomyPolicy,
+    AutonomyRequest,
+    DecisionReason,
+)
 from core.orchestration.models import (
     WorkflowProgress,
     WorkflowRecord,
@@ -11,6 +18,11 @@ from core.orchestration.state_store import (
 )
 
 __all__ = [
+    "AutonomyAction",
+    "AutonomyDecision",
+    "AutonomyPolicy",
+    "AutonomyRequest",
+    "DecisionReason",
     "WorkflowProgress",
     "WorkflowRecord",
     "WorkflowStateError",
