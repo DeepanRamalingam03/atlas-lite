@@ -7,6 +7,9 @@ import discord
 from discord.ext import commands
 
 from assistants.service import AtlasAssistant
+from discord_gateway.runtime_controls import (
+    DiscordRuntimeControls,
+)
 
 
 logger = logging.getLogger(__name__)
@@ -21,6 +24,11 @@ class AtlasDiscordBot(commands.Bot):
     - !status
     - !ask <question>
     - !reset
+    - !runtime
+    - !roadmap
+    - !workflow [workflow_id]
+    - !pause <roadmap_task_id>
+    - !resume <roadmap_task_id>
     """
 
     DISCORD_MESSAGE_LIMIT = 1900
@@ -31,6 +39,7 @@ class AtlasDiscordBot(commands.Bot):
         channel_id: int,
         allowed_user_id: int,
         assistant: AtlasAssistant,
+        runtime_controls: DiscordRuntimeControls | None = None,
     ) -> None:
         intents = discord.Intents.default()
         intents.message_content = True
@@ -45,6 +54,10 @@ class AtlasDiscordBot(commands.Bot):
         self.allowed_channel_id = channel_id
         self.allowed_user_id = allowed_user_id
         self.assistant = assistant
+        self.runtime_controls = (
+            runtime_controls
+            or DiscordRuntimeControls()
+        )
         self._startup_message_sent = False
 
         self._register_commands()
@@ -54,28 +67,46 @@ class AtlasDiscordBot(commands.Bot):
         async def ping_command(
             context: commands.Context[AtlasDiscordBot],
         ) -> None:
-            latency_ms = round(self.latency * 1000)
+            latency_ms = round(
+                self.latency * 1000
+            )
 
             await context.send(
-                f"Atlas Lite connected. Latency: `{latency_ms} ms`"
+                "Atlas Lite connected. "
+                f"Latency: `{latency_ms} ms`"
             )
 
         @self.command(name="status")
         async def status_command(
             context: commands.Context[AtlasDiscordBot],
         ) -> None:
-            history_size = self.assistant.history_size(
-                context.author.id
+            history_size = (
+                self.assistant.history_size(
+                    context.author.id
+                )
             )
 
-            await context.send(
+            runtime = (
+                self.runtime_controls.runtime_status(
+                    context.author.id
+                )
+            )
+
+            message = (
                 "**Atlas Lite Status**\n"
                 "Manager: OpenAI\n"
                 "Worker: Gemini\n"
                 "Discord gateway: Connected\n"
-                f"Conversation history turns: `{history_size}`\n"
-                "AI assistant: Ready"
+                f"Conversation history turns: "
+                f"`{history_size}`\n"
+                "AI assistant: Ready\n\n"
+                f"{runtime.message}"
             )
+
+            for chunk in self._split_message(
+                message
+            ):
+                await context.send(chunk)
 
         @self.command(name="ask")
         async def ask_command(
@@ -109,8 +140,10 @@ class AtlasDiscordBot(commands.Bot):
                     )
                     return
 
-            for message_chunk in self._split_message(answer):
-                await context.send(message_chunk)
+            for chunk in self._split_message(
+                answer
+            ):
+                await context.send(chunk)
 
         @self.command(name="reset")
         async def reset_command(
@@ -124,8 +157,81 @@ class AtlasDiscordBot(commands.Bot):
                 "Atlas conversation history cleared."
             )
 
+        @self.command(name="runtime")
+        async def runtime_command(
+            context: commands.Context[AtlasDiscordBot],
+        ) -> None:
+            result = await asyncio.to_thread(
+                self.runtime_controls.runtime_status,
+                context.author.id,
+            )
+
+            for chunk in self._split_message(
+                result.message
+            ):
+                await context.send(chunk)
+
+        @self.command(name="roadmap")
+        async def roadmap_command(
+            context: commands.Context[AtlasDiscordBot],
+        ) -> None:
+            result = await asyncio.to_thread(
+                self.runtime_controls.roadmap_status
+            )
+
+            for chunk in self._split_message(
+                result.message
+            ):
+                await context.send(chunk)
+
+        @self.command(name="workflow")
+        async def workflow_command(
+            context: commands.Context[AtlasDiscordBot],
+            workflow_id: str | None = None,
+        ) -> None:
+            result = await asyncio.to_thread(
+                self.runtime_controls.workflow_status,
+                context.author.id,
+                workflow_id,
+            )
+
+            for chunk in self._split_message(
+                result.message
+            ):
+                await context.send(chunk)
+
+        @self.command(name="pause")
+        async def pause_command(
+            context: commands.Context[AtlasDiscordBot],
+            task_id: str,
+        ) -> None:
+            result = await asyncio.to_thread(
+                self.runtime_controls.pause_task,
+                task_id,
+            )
+
+            await context.send(
+                result.message
+            )
+
+        @self.command(name="resume")
+        async def resume_command(
+            context: commands.Context[AtlasDiscordBot],
+            task_id: str,
+        ) -> None:
+            result = await asyncio.to_thread(
+                self.runtime_controls.resume_task,
+                task_id,
+            )
+
+            await context.send(
+                result.message
+            )
+
     async def setup_hook(self) -> None:
-        logger.info("Atlas Discord setup completed.")
+        logger.info(
+            "Atlas Discord setup completed."
+        )
 
     async def on_ready(self) -> None:
         if self.user is None:
@@ -147,9 +253,13 @@ class AtlasDiscordBot(commands.Bot):
             self.allowed_channel_id
         )
 
-        if not isinstance(channel, discord.TextChannel):
+        if not isinstance(
+            channel,
+            discord.TextChannel,
+        ):
             logger.error(
-                "Configured Discord channel was not found: %s",
+                "Configured Discord channel "
+                "was not found: %s",
                 self.allowed_channel_id,
             )
             return
@@ -159,6 +269,11 @@ class AtlasDiscordBot(commands.Bot):
             "Commands:\n"
             "`!ask <question>`\n"
             "`!status`\n"
+            "`!runtime`\n"
+            "`!roadmap`\n"
+            "`!workflow [workflow_id]`\n"
+            "`!pause <roadmap_task_id>`\n"
+            "`!resume <roadmap_task_id>`\n"
             "`!ping`\n"
             "`!reset`"
         )
@@ -170,13 +285,19 @@ class AtlasDiscordBot(commands.Bot):
         context: commands.Context[AtlasDiscordBot],
         error: commands.CommandError,
     ) -> None:
-        if isinstance(error, commands.CommandNotFound):
+        if isinstance(
+            error,
+            commands.CommandNotFound,
+        ):
             return
 
-        if isinstance(error, commands.MissingRequiredArgument):
+        if isinstance(
+            error,
+            commands.MissingRequiredArgument,
+        ):
             await context.send(
-                "Missing input. Example: "
-                "`!ask Explain the Atlas architecture`"
+                "Missing input. Check command usage with "
+                "`!status`."
             )
             return
 
@@ -193,7 +314,8 @@ class AtlasDiscordBot(commands.Bot):
 
         await context.send(
             "Atlas command failed: "
-            f"`{type(original_error).__name__}`"
+            f"`{type(original_error).__name__}: "
+            f"{original_error}`"
         )
 
     async def on_message(
@@ -214,7 +336,9 @@ class AtlasDiscordBot(commands.Bot):
         ):
             return
 
-        await self.process_commands(message)
+        await self.process_commands(
+            message
+        )
 
     def _is_allowed(
         self,
@@ -223,9 +347,12 @@ class AtlasDiscordBot(commands.Bot):
         user_id: int,
     ) -> bool:
         return (
-            guild_id == self.allowed_guild_id
-            and channel_id == self.allowed_channel_id
-            and user_id == self.allowed_user_id
+            guild_id
+            == self.allowed_guild_id
+            and channel_id
+            == self.allowed_channel_id
+            and user_id
+            == self.allowed_user_id
         )
 
     @classmethod
@@ -236,12 +363,17 @@ class AtlasDiscordBot(commands.Bot):
         cleaned_content = content.strip()
 
         if not cleaned_content:
-            return ["Atlas returned an empty response."]
+            return [
+                "Atlas returned an empty response."
+            ]
 
         chunks: list[str] = []
         remaining = cleaned_content
 
-        while len(remaining) > cls.DISCORD_MESSAGE_LIMIT:
+        while (
+            len(remaining)
+            > cls.DISCORD_MESSAGE_LIMIT
+        ):
             split_at = remaining.rfind(
                 "\n",
                 0,
@@ -249,14 +381,20 @@ class AtlasDiscordBot(commands.Bot):
             )
 
             if split_at <= 0:
-                split_at = cls.DISCORD_MESSAGE_LIMIT
+                split_at = (
+                    cls.DISCORD_MESSAGE_LIMIT
+                )
 
-            chunk = remaining[:split_at].strip()
+            chunk = remaining[
+                :split_at
+            ].strip()
 
             if chunk:
                 chunks.append(chunk)
 
-            remaining = remaining[split_at:].strip()
+            remaining = remaining[
+                split_at:
+            ].strip()
 
         if remaining:
             chunks.append(remaining)
