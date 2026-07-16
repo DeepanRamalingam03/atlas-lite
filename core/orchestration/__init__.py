@@ -23,6 +23,14 @@ from core.orchestration.recovery_manager import (
     RecoveryAssessment,
     WorkflowRecoveryManager,
 )
+from core.orchestration.roadmap import (
+    RoadmapSelection,
+    RoadmapStoreError,
+    RoadmapTask,
+    RoadmapTaskSelector,
+    RoadmapTaskStatus,
+    RoadmapTaskStore,
+)
 from core.orchestration.runtime_lock import (
     RuntimeLockError,
     RuntimeLockOwner,
@@ -45,6 +53,12 @@ __all__ = [
     "DevelopmentReleaseCoordinator",
     "RecoveryAction",
     "RecoveryAssessment",
+    "RoadmapSelection",
+    "RoadmapStoreError",
+    "RoadmapTask",
+    "RoadmapTaskSelector",
+    "RoadmapTaskStatus",
+    "RoadmapTaskStore",
     "RuntimeLockError",
     "RuntimeLockOwner",
     "RuntimeProcessLock",
