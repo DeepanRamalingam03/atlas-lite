@@ -23,6 +23,11 @@ from core.orchestration.recovery_manager import (
     RecoveryAssessment,
     WorkflowRecoveryManager,
 )
+from core.orchestration.runtime_lock import (
+    RuntimeLockError,
+    RuntimeLockOwner,
+    RuntimeProcessLock,
+)
 from core.orchestration.state_store import (
     WorkflowStateError,
     WorkflowStateStore,
@@ -40,6 +45,9 @@ __all__ = [
     "DevelopmentReleaseCoordinator",
     "RecoveryAction",
     "RecoveryAssessment",
+    "RuntimeLockError",
+    "RuntimeLockOwner",
+    "RuntimeProcessLock",
     "WorkflowProgress",
     "WorkflowRecord",
     "WorkflowRecoveryManager",
