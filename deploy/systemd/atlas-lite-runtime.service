@@ -1,0 +1,22 @@
+[Unit]
+Description=Atlas Lite Continuous Orchestrator
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=ubuntu
+Group=ubuntu
+WorkingDirectory=/home/ubuntu/atlas-lite
+EnvironmentFile=/home/ubuntu/atlas-lite/.env
+Environment=PYTHONUNBUFFERED=1
+Environment=PYTHONDONTWRITEBYTECODE=1
+ExecStart=/home/ubuntu/atlas-lite/venv/bin/python /home/ubuntu/atlas-lite/run_continuous_runtime.py
+Restart=always
+RestartSec=15
+TimeoutStopSec=60
+KillSignal=SIGTERM
+UMask=0077
+
+[Install]
+WantedBy=multi-user.target
