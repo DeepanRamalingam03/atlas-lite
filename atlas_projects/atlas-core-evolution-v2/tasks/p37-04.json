@@ -1,0 +1,21 @@
+{
+  "task_id": "p37-04",
+  "title": "Add file-count and new-file limits",
+  "goal": "ATLAS CORE EVOLUTION V2\n=======================\nPhase: 37\nSubtask: p37-04\n\nOBJECTIVE\n=========\nExtend deterministic review rules with maximum changed-file and maximum new-file enforcement. Keep configuration explicit and bounded. Do not implement rewrite detection yet.\n\nSTRICT ALLOWED FILES\n====================\n- core/review_guard/rules.py\n- test_phase37_file_limit_rules.py\n\nIMPLEMENTATION LIMITS\n=====================\n- Maximum changed files: 2\n- Maximum new files: 1\n- Existing files must be minimally extended, not replaced.\n- Any required work outside this boundary must be deferred to the next roadmap task.\n\nMANDATORY RULES\n===============\n- Treat the current Git-tracked repository as the only source of truth.\n- Inspect every allowed existing file before generating modifications.\n- Preserve all existing public interfaces and production behavior.\n- Apply minimal targeted edits; never recreate or simplify an existing file.\n- Do not modify files outside the explicit allowed-file list.\n- Change no more than 2 repository files.\n- Create no more than 1 new files.\n- Return complete file content only for files genuinely changed.\n- Do not return unrelated cleanup, redesign, formatting, or refactoring.\n- Do not touch secrets, .env files, generated runtime data, or Git history.\n- Run the specified targeted validation before approval.\n- Manager must reject any whole-file rewrite that is not strictly necessary.\n- Complete this one subtask only; do not begin the next subtask.\n\nVALIDATION\n==========\n- python -m py_compile core/review_guard/rules.py\n- python -m unittest -v test_phase37_file_limit_rules.py test_phase37_allowed_path_rule.py\n\nCOMPLETION CONTRACT\n===================\n- Produce one production-safe, backward-compatible repository change.\n- Tests and compile checks must pass.\n- Manager approval is required.\n- Commit and push only this subtask after approval.\n- Do not mark the task complete without verified Git evidence.",
+  "priority": 1,
+  "depends_on": [
+    "p37-03"
+  ],
+  "source": "chatgpt-architect-spoon-fed-v2",
+  "allowed_files": [
+    "core/review_guard/rules.py",
+    "test_phase37_file_limit_rules.py"
+  ],
+  "max_files_changed": 2,
+  "max_new_files": 1,
+  "validation_commands": [
+    "python -m py_compile core/review_guard/rules.py",
+    "python -m unittest -v test_phase37_file_limit_rules.py test_phase37_allowed_path_rule.py"
+  ],
+  "commit_message": "p37-04: Add file-count and new-file limits"
+}

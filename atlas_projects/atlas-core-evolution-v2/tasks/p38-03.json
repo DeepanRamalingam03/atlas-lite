@@ -1,0 +1,22 @@
+{
+  "task_id": "p38-03",
+  "title": "Implement Python import extraction",
+  "goal": "ATLAS CORE EVOLUTION V2\n=======================\nPhase: 38\nSubtask: p38-03\n\nOBJECTIVE\n=========\nCreate deterministic AST-based extraction for import and from-import relationships. Syntax failures must be represented safely without crashing the full scan. No symbol indexing yet.\n\nSTRICT ALLOWED FILES\n====================\n- core/repository_index/python_analyzer.py\n- core/repository_index/__init__.py\n- test_phase38_import_analysis.py\n\nIMPLEMENTATION LIMITS\n=====================\n- Maximum changed files: 3\n- Maximum new files: 2\n- Existing files must be minimally extended, not replaced.\n- Any required work outside this boundary must be deferred to the next roadmap task.\n\nMANDATORY RULES\n===============\n- Treat the current Git-tracked repository as the only source of truth.\n- Inspect every allowed existing file before generating modifications.\n- Preserve all existing public interfaces and production behavior.\n- Apply minimal targeted edits; never recreate or simplify an existing file.\n- Do not modify files outside the explicit allowed-file list.\n- Change no more than 3 repository files.\n- Create no more than 2 new files.\n- Return complete file content only for files genuinely changed.\n- Do not return unrelated cleanup, redesign, formatting, or refactoring.\n- Do not touch secrets, .env files, generated runtime data, or Git history.\n- Run the specified targeted validation before approval.\n- Manager must reject any whole-file rewrite that is not strictly necessary.\n- Complete this one subtask only; do not begin the next subtask.\n\nVALIDATION\n==========\n- python -m py_compile core/repository_index/python_analyzer.py\n- python -m unittest -v test_phase38_import_analysis.py\n\nCOMPLETION CONTRACT\n===================\n- Produce one production-safe, backward-compatible repository change.\n- Tests and compile checks must pass.\n- Manager approval is required.\n- Commit and push only this subtask after approval.\n- Do not mark the task complete without verified Git evidence.",
+  "priority": 1,
+  "depends_on": [
+    "p38-02"
+  ],
+  "source": "chatgpt-architect-spoon-fed-v2",
+  "allowed_files": [
+    "core/repository_index/python_analyzer.py",
+    "core/repository_index/__init__.py",
+    "test_phase38_import_analysis.py"
+  ],
+  "max_files_changed": 3,
+  "max_new_files": 2,
+  "validation_commands": [
+    "python -m py_compile core/repository_index/python_analyzer.py",
+    "python -m unittest -v test_phase38_import_analysis.py"
+  ],
+  "commit_message": "p38-03: Implement Python import extraction"
+}

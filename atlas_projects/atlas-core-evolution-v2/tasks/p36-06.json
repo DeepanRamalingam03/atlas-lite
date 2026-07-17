@@ -1,0 +1,22 @@
+{
+  "task_id": "p36-06",
+  "title": "Implement provider usage metrics",
+  "goal": "ATLAS CORE EVOLUTION V2\n=======================\nPhase: 36\nSubtask: p36-06\n\nOBJECTIVE\n=========\nAdd provider token-usage aggregation using only existing TokenUsageLedger public APIs. Report request totals, success/failure counts, input/output/total/cached/reasoning tokens, and provider summaries. Empty ledger means data unavailable, not a verified zero-cost history.\n\nSTRICT ALLOWED FILES\n====================\n- core/orchestration/metrics.py\n- test_phase36_usage_metrics.py\n\nIMPLEMENTATION LIMITS\n=====================\n- Maximum changed files: 2\n- Maximum new files: 1\n- Existing files must be minimally extended, not replaced.\n- Any required work outside this boundary must be deferred to the next roadmap task.\n\nMANDATORY RULES\n===============\n- Treat the current Git-tracked repository as the only source of truth.\n- Inspect every allowed existing file before generating modifications.\n- Preserve all existing public interfaces and production behavior.\n- Apply minimal targeted edits; never recreate or simplify an existing file.\n- Do not modify files outside the explicit allowed-file list.\n- Change no more than 2 repository files.\n- Create no more than 1 new files.\n- Return complete file content only for files genuinely changed.\n- Do not return unrelated cleanup, redesign, formatting, or refactoring.\n- Do not touch secrets, .env files, generated runtime data, or Git history.\n- Run the specified targeted validation before approval.\n- Manager must reject any whole-file rewrite that is not strictly necessary.\n- Complete this one subtask only; do not begin the next subtask.\n\nVALIDATION\n==========\n- python -m py_compile core/orchestration/metrics.py\n- python -m unittest -v test_phase36_usage_metrics.py\n- python -m unittest -v test_provider_token_capture.py test_token_usage_ledger.py\n\nCOMPLETION CONTRACT\n===================\n- Produce one production-safe, backward-compatible repository change.\n- Tests and compile checks must pass.\n- Manager approval is required.\n- Commit and push only this subtask after approval.\n- Do not mark the task complete without verified Git evidence.",
+  "priority": 1,
+  "depends_on": [
+    "p36-05"
+  ],
+  "source": "chatgpt-architect-spoon-fed-v2",
+  "allowed_files": [
+    "core/orchestration/metrics.py",
+    "test_phase36_usage_metrics.py"
+  ],
+  "max_files_changed": 2,
+  "max_new_files": 1,
+  "validation_commands": [
+    "python -m py_compile core/orchestration/metrics.py",
+    "python -m unittest -v test_phase36_usage_metrics.py",
+    "python -m unittest -v test_provider_token_capture.py test_token_usage_ledger.py"
+  ],
+  "commit_message": "p36-06: Implement provider usage metrics"
+}
