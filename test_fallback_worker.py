@@ -199,17 +199,21 @@ class FallbackWorkerTest(
             "fallback response",
         )
 
-    def test_non_transient_error_does_not_fallback(
+    def test_opaque_provider_error_uses_fallback(
         self,
     ) -> None:
+        class OpaqueProviderError(
+            RuntimeError
+        ):
+            def __str__(self) -> str:
+                return "provider request failed"
+
         primary = FakeWorker(
-            error=ValueError(
-                "Invalid worker instruction"
-            )
+            error=OpaqueProviderError()
         )
 
         fallback = FakeWorker(
-            response="must not run"
+            response="fallback completed"
         )
 
         worker = FallbackWorker(
@@ -219,16 +223,52 @@ class FallbackWorkerTest(
             )
         )
 
-        with self.assertRaises(
-            ValueError
-        ):
-            worker.execute(
-                "Build feature."
-            )
+        result = worker.execute(
+            "Build feature."
+        )
 
         self.assertEqual(
-            fallback.calls,
-            [],
+            result,
+            "fallback completed",
+        )
+
+        self.assertEqual(
+            len(primary.calls),
+            1,
+        )
+
+        self.assertEqual(
+            len(fallback.calls),
+            1,
+        )
+
+    def test_value_error_from_provider_uses_fallback(
+        self,
+    ) -> None:
+        primary = FakeWorker(
+            error=ValueError(
+                "Provider rejected request."
+            )
+        )
+
+        fallback = FakeWorker(
+            response="fallback completed"
+        )
+
+        worker = FallbackWorker(
+            workers=(
+                ("gemini", primary),
+                ("openai", fallback),
+            )
+        )
+
+        result = worker.execute(
+            "Build feature."
+        )
+
+        self.assertEqual(
+            result,
+            "fallback completed",
         )
 
     def test_all_provider_failures_are_reported(

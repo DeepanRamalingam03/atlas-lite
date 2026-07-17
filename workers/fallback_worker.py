@@ -46,12 +46,12 @@ class FallbackWorker(BaseWorker):
     """
     Executes a coding instruction using an ordered worker list.
 
-    Failover occurs only for transient provider failures such as
-    timeouts, rate limits, unavailable services, and HTTP 5xx errors.
+    Failover occurs when a configured provider worker raises an
+    exception and another provider remains available.
 
-    Invalid instructions, malformed worker output, test failures,
-    and manager rejections are deliberately not provider-failover
-    conditions.
+    The boundary is intentionally narrow: malformed parsed output,
+    test failures, and manager rejections happen after execute()
+    returns and therefore never trigger provider failover.
     """
 
     TRANSIENT_MARKERS = (
@@ -178,12 +178,7 @@ class FallbackWorker(BaseWorker):
                     < len(self.workers) - 1
                 )
 
-                if (
-                    not has_fallback
-                    or not self.is_transient(
-                        exc
-                    )
-                ):
+                if not has_fallback:
                     self.last_attempts = tuple(
                         attempts
                     )
@@ -197,9 +192,8 @@ class FallbackWorker(BaseWorker):
 
                 logger.warning(
                     "Atlas worker provider %s "
-                    "failed transiently; switching "
-                    "to the next configured worker. "
-                    "Failure: %s",
+                    "failed; switching to the next "
+                    "configured worker. Failure: %s",
                     provider,
                     error,
                 )
