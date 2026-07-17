@@ -1,0 +1,9 @@
+{
+  "task_id": "p37",
+  "title": "Phase 37 - Deterministic Review Guard",
+  "priority": 1,
+  "depends_on": [
+    "p36"
+  ],
+  "goal": "Implement Phase 37 only after project task p36 is completed. Read atlas_projects/atlas-core-evolution/PROJECT.md, EXECUTION_RULES.md, and knowledge/phase37_requirements.md before implementation. Inspect the existing pipeline, worker parser, workspace writer, staging validator, autonomy policy, repository grounding, manager review parser, continuous orchestrator, release safety, and protected-path logic. Add a structured deterministic review guard that evaluates staged changes using verified evidence before final approval and release. It must detect unsafe paths, traversal, invalid or empty staged output, protected paths, clearly unexpected files when task scope is explicit, missing tests for behavior changes where deterministically measurable, repository-versus-staging confusion, and other evidence-based policy failures. The guard must return structured passed, failed, warning, reason, category, affected-path, and human-approval evidence. A deterministic failure must prevent release even if AI review says approved. Warnings should reach manager review evidence without being misrepresented as proven semantic failures. Preserve legacy behavior when the guard is disabled. Do not replace manager review, repository grounding, or tests. Include compile checks, targeted tests, override tests, protected-path tests, backward-compatibility tests, production wiring tests, and full non-live regression. Commit and push only after validation and manager approval. Restart and verify all services, Discord gateway, runtime heartbeat, Git synchronization, and a controlled production guard check before completing this roadmap task."
+}

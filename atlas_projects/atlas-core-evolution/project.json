@@ -1,0 +1,11 @@
+{
+  "project_id": "atlas-core-evolution",
+  "name": "Atlas Core Evolution",
+  "version": "1.0",
+  "description": "Autonomously complete Atlas phases 36 to 38 in strict dependency order while preserving all existing production capabilities.",
+  "tasks": [
+    "tasks/p36.json",
+    "tasks/p37.json",
+    "tasks/p38.json"
+  ]
+}

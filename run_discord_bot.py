@@ -24,6 +24,9 @@ from core.orchestration.roadmap import (
     RoadmapTaskSelector,
     RoadmapTaskStore,
 )
+from core.projects.project_runner import (
+    ProjectFolderRunner,
+)
 from core.orchestration.state_store import (
     WorkflowStateStore,
 )
@@ -31,6 +34,9 @@ from core.usage.token_ledger import (
     TokenUsageLedger,
 )
 from discord_gateway.bot import AtlasDiscordBot
+from discord_gateway.project_controls import (
+    DiscordProjectControls,
+)
 from discord_gateway.runtime_controls import (
     DiscordRuntimeControls,
 )
@@ -90,6 +96,33 @@ def build_assistant() -> AtlasAssistant:
 
     return AtlasAssistant(
         manager=manager
+    )
+
+
+def build_project_controls(
+) -> DiscordProjectControls:
+    DATA_ROOT.mkdir(
+        parents=True,
+        exist_ok=True,
+    )
+
+    roadmap_store = RoadmapTaskStore(
+        storage_path=(
+            DATA_ROOT / "roadmap_tasks.json"
+        )
+    )
+
+    runner = ProjectFolderRunner(
+        roadmap_store=roadmap_store,
+        projects_root=(
+            PROJECT_ROOT / "atlas_projects"
+        ),
+        max_tasks=100,
+        max_goal_characters=20_000,
+    )
+
+    return DiscordProjectControls(
+        runner=runner
     )
 
 
@@ -198,6 +231,9 @@ def main() -> None:
         ),
         usage_controls=(
             build_usage_controls()
+        ),
+        project_controls=(
+            build_project_controls()
         ),
     )
 

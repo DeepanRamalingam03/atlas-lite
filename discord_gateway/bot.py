@@ -10,6 +10,9 @@ from assistants.service import AtlasAssistant
 from core.usage.token_ledger import (
     TokenUsageLedger,
 )
+from discord_gateway.project_controls import (
+    DiscordProjectControls,
+)
 from discord_gateway.runtime_controls import (
     DiscordRuntimeControls,
 )
@@ -54,8 +57,11 @@ class AtlasDiscordBot(commands.Bot):
         runtime_controls: (
             DiscordRuntimeControls | None
         ) = None,
-        usage_controls: (
+                usage_controls: (
             DiscordUsageControls | None
+        ) = None,
+        project_controls: (
+            DiscordProjectControls | None
         ) = None,
     ) -> None:
         intents = discord.Intents.default()
@@ -80,6 +86,10 @@ class AtlasDiscordBot(commands.Bot):
             or DiscordUsageControls(
                 ledger=TokenUsageLedger()
             )
+        )
+        self.project_controls = (
+            project_controls
+            or DiscordProjectControls()
         )
         self._startup_message_sent = False
 
@@ -398,6 +408,42 @@ class AtlasDiscordBot(commands.Bot):
                     "discord-architect:"
                     f"{context.author.id}"
                 ),
+            )
+
+            await self._send_chunks(
+                context,
+                result.message,
+            )
+
+        @self.command(name="project")
+        async def project_command(
+            context: commands.Context[
+                AtlasDiscordBot
+            ],
+            project_name: str,
+        ) -> None:
+            result = await asyncio.to_thread(
+                self.project_controls
+                .preview_project,
+                project_name,
+            )
+
+            await self._send_chunks(
+                context,
+                result.message,
+            )
+
+        @self.command(name="runproject")
+        async def run_project_command(
+            context: commands.Context[
+                AtlasDiscordBot
+            ],
+            project_name: str,
+        ) -> None:
+            result = await asyncio.to_thread(
+                self.project_controls
+                .run_project,
+                project_name,
             )
 
             await self._send_chunks(

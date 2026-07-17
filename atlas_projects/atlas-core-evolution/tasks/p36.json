@@ -1,0 +1,7 @@
+{
+  "task_id": "p36",
+  "title": "Phase 36 - Runtime Metrics and Engineering Analytics",
+  "priority": 1,
+  "depends_on": [],
+  "goal": "Implement Phase 36 as one production-safe repository change. Read atlas_projects/atlas-core-evolution/PROJECT.md, EXECUTION_RULES.md, and knowledge/phase36_requirements.md before implementation. Inspect the existing workflow state store, roadmap store, runtime heartbeat and alert stores, token usage ledger, pricing engine, Discord controls, bot command structure, and production builders. Build deterministic bounded engineering metrics for workflow totals, completion and failure counts, retry rate, manager approval rate, average iterations, workflow duration where verified data exists, normalized failure reasons, provider token usage, and estimated USD and INR cost. Add a backward-compatible Discord metrics report following existing command patterns. Reuse existing usage and pricing components rather than duplicating them. Distinguish unavailable historic data from zero. Do not store raw prompts, secrets, or full model output. Include compile checks, targeted tests, failure-path tests, backward-compatibility tests, production-construction tests, and full non-live regression. Commit and push only after validation and manager approval. Restart and verify runtime, Discord, and alert services. Verify the Discord gateway, runtime heartbeat, clean Git state, and production metrics report before marking this roadmap task complete."
+}
