@@ -349,7 +349,7 @@ class DiscordUsageControlsTest(
         self,
     ) -> None:
         result = self.controls.usage(
-            "month"
+            "year"
         )
 
         self.assertFalse(
