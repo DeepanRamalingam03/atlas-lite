@@ -9,6 +9,9 @@ from managers.base_manager import BaseManager
 from services.project.repository_grounding_service import (
     RepositoryGroundingService,
 )
+from services.planning.execution_plan_context import (
+    ExecutionPlanContextService,
+)
 from services.prompt_builder import PromptBuilder
 from services.review_parser import (
     ReviewDecision,
@@ -93,6 +96,10 @@ class AtlasPipeline:
         ) = None,
         auto_ground_repository: bool = True,
         max_grounding_characters: int = 100_000,
+        planning_service: (
+            ExecutionPlanContextService | None
+        ) = None,
+        auto_plan: bool = False,
     ) -> None:
         if max_iterations < 1:
             raise ValueError(
@@ -124,6 +131,15 @@ class AtlasPipeline:
             )
         )
 
+        self.planning_service = (
+            planning_service
+            or (
+                ExecutionPlanContextService()
+                if auto_plan
+                else None
+            )
+        )
+
     def execute(
         self,
         goal: str,
@@ -135,6 +151,12 @@ class AtlasPipeline:
                 "Goal cannot be empty."
             )
 
+        planning_context = (
+            self._build_planning_context(
+                cleaned_goal
+            )
+        )
+
         grounding_context = (
             self._build_grounding_context(
                 cleaned_goal
@@ -144,6 +166,9 @@ class AtlasPipeline:
         grounded_goal = (
             self._compose_grounded_goal(
                 goal=cleaned_goal,
+                planning_context=(
+                    planning_context
+                ),
                 grounding_context=(
                     grounding_context
                 ),
@@ -447,6 +472,27 @@ class AtlasPipeline:
             )
         )
 
+    def _build_planning_context(
+        self,
+        goal: str,
+    ) -> str:
+        if self.planning_service is None:
+            return ""
+
+        context = self.planning_service.build(
+            goal
+        )
+
+        rendered = context.rendered_context.strip()
+
+        if not rendered:
+            raise RuntimeError(
+                "Execution planning service "
+                "returned empty context."
+            )
+
+        return rendered
+
     def _build_grounding_context(
         self,
         goal: str,
@@ -545,17 +591,42 @@ class AtlasPipeline:
     def _compose_grounded_goal(
         *,
         goal: str,
+        planning_context: str,
         grounding_context: str,
     ) -> str:
-        if not grounding_context:
+        cleaned_planning = (
+            planning_context.strip()
+        )
+
+        cleaned_grounding = (
+            grounding_context.strip()
+        )
+
+        if (
+            not cleaned_planning
+            and not cleaned_grounding
+        ):
             return goal
 
-        return (
-            "ORIGINAL ARCHITECT GOAL\n"
-            "=======================\n"
-            f"{goal}\n\n"
-            f"{grounding_context}"
-        )
+        sections = [
+            (
+                "ORIGINAL ARCHITECT GOAL\n"
+                "=======================\n"
+                f"{goal}"
+            )
+        ]
+
+        if cleaned_planning:
+            sections.append(
+                cleaned_planning
+            )
+
+        if cleaned_grounding:
+            sections.append(
+                cleaned_grounding
+            )
+
+        return "\n\n".join(sections)
 
     @staticmethod
     def _build_review_input(

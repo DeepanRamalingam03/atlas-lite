@@ -58,6 +58,9 @@ from git_tools.engine import GitEngine
 from managers.openai_manager import OpenAIManager
 from orchestrator.pipeline import AtlasPipeline
 from release.coordinator import ReleaseCoordinator
+from services.planning.execution_plan_context import (
+    ExecutionPlanContextService,
+)
 from services.prompt_builder import PromptBuilder
 from services.review_parser import ReviewParser
 from services.worker_output_parser import (
@@ -202,6 +205,24 @@ def build_pipeline() -> AtlasPipeline:
         max_iterations=(
             config.MAX_REVIEW_ITERATIONS
         ),
+        planning_service=(
+            ExecutionPlanContextService(
+                max_tasks=positive_integer(
+                    "ATLAS_PLANNING_MAX_TASKS",
+                    12,
+                ),
+                max_characters=positive_integer(
+                    "ATLAS_PLANNING_MAX_CHARACTERS",
+                    12_000,
+                ),
+            )
+            if boolean_setting(
+                "ATLAS_PLANNING_ENABLED",
+                True,
+            )
+            else None
+        ),
+        auto_plan=False,
     )
 
 
