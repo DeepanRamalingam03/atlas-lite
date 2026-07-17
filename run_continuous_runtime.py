@@ -71,6 +71,9 @@ from services.worker_output_parser import (
 )
 from testing.runner import StagingTestRunner
 from utils.logger import setup_logger
+from workers.fallback_worker import (
+    FallbackWorker,
+)
 from workers.gemini_worker import GeminiWorker
 from workspace.diff_engine import WorkspaceDiffEngine
 from workspace.writer import WorkspaceWriter
@@ -243,9 +246,28 @@ def build_pipeline() -> AtlasPipeline:
                 "openai"
             ),
         ),
-        worker=GeminiWorker(
-            client=ClientFactory.create(
-                "gemini"
+        worker=FallbackWorker(
+            workers=(
+                (
+                    "gemini",
+                    GeminiWorker(
+                        client=(
+                            ClientFactory.create(
+                                "gemini"
+                            )
+                        ),
+                    ),
+                ),
+                (
+                    "openai",
+                    GeminiWorker(
+                        client=(
+                            ClientFactory.create(
+                                "openai"
+                            )
+                        ),
+                    ),
+                ),
             ),
         ),
         prompt_builder=PromptBuilder(),
