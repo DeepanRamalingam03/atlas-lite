@@ -249,16 +249,6 @@ def build_pipeline() -> AtlasPipeline:
         worker=FallbackWorker(
             workers=(
                 (
-                    "gemini",
-                    GeminiWorker(
-                        client=(
-                            ClientFactory.create(
-                                "gemini"
-                            )
-                        ),
-                    ),
-                ),
-                (
                     "openai",
                     GeminiWorker(
                         client=(
