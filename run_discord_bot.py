@@ -27,9 +27,15 @@ from core.orchestration.roadmap import (
 from core.orchestration.state_store import (
     WorkflowStateStore,
 )
+from core.usage.token_ledger import (
+    TokenUsageLedger,
+)
 from discord_gateway.bot import AtlasDiscordBot
 from discord_gateway.runtime_controls import (
     DiscordRuntimeControls,
+)
+from discord_gateway.usage_controls import (
+    DiscordUsageControls,
 )
 from services.code_validator import (
     PythonCodeValidator,
@@ -139,6 +145,25 @@ def build_runtime_controls(
     )
 
 
+def build_usage_controls(
+) -> DiscordUsageControls:
+    DATA_ROOT.mkdir(
+        parents=True,
+        exist_ok=True,
+    )
+
+    ledger = TokenUsageLedger(
+        storage_path=(
+            DATA_ROOT
+            / "ai_token_usage.json"
+        )
+    )
+
+    return DiscordUsageControls(
+        ledger=ledger
+    )
+
+
 def main() -> None:
     setup_logger(
         "atlas-lite.discord"
@@ -170,6 +195,9 @@ def main() -> None:
         assistant=build_assistant(),
         runtime_controls=(
             build_runtime_controls()
+        ),
+        usage_controls=(
+            build_usage_controls()
         ),
     )
 

@@ -7,8 +7,14 @@ import discord
 from discord.ext import commands
 
 from assistants.service import AtlasAssistant
+from core.usage.token_ledger import (
+    TokenUsageLedger,
+)
 from discord_gateway.runtime_controls import (
     DiscordRuntimeControls,
+)
+from discord_gateway.usage_controls import (
+    DiscordUsageControls,
 )
 
 
@@ -28,6 +34,7 @@ class AtlasDiscordBot(commands.Bot):
     - !roadmap
     - !workflow [workflow_id]
     - !heartbeat
+    - !usage [today|week|all] [all|openai|gemini]
     - !alerts
     - !ackalerts
     - !addtask <priority> | <title> | <goal>
@@ -46,6 +53,9 @@ class AtlasDiscordBot(commands.Bot):
         runtime_controls: (
             DiscordRuntimeControls | None
         ) = None,
+        usage_controls: (
+            DiscordUsageControls | None
+        ) = None,
     ) -> None:
         intents = discord.Intents.default()
         intents.message_content = True
@@ -63,6 +73,12 @@ class AtlasDiscordBot(commands.Bot):
         self.runtime_controls = (
             runtime_controls
             or DiscordRuntimeControls()
+        )
+        self.usage_controls = (
+            usage_controls
+            or DiscordUsageControls(
+                ledger=TokenUsageLedger()
+            )
         )
         self._startup_message_sent = False
 
@@ -238,6 +254,46 @@ class AtlasDiscordBot(commands.Bot):
                 result.message,
             )
 
+        @self.command(name="usage")
+        async def usage_command(
+            context: commands.Context[
+                AtlasDiscordBot
+            ],
+            period: str = "today",
+            provider: str = "all",
+        ) -> None:
+            selected_period = (
+                period.strip().lower()
+                if period
+                else "today"
+            )
+
+            selected_provider = (
+                provider.strip().lower()
+                if provider
+                else "all"
+            )
+
+            if selected_period in {
+                "help",
+                "commands",
+            }:
+                result = await asyncio.to_thread(
+                    self.usage_controls
+                    .help_message
+                )
+            else:
+                result = await asyncio.to_thread(
+                    self.usage_controls.usage,
+                    selected_period,
+                    selected_provider,
+                )
+
+            await self._send_chunks(
+                context,
+                result.message,
+            )
+
         @self.command(name="alerts")
         async def alerts_command(
             context: commands.Context[
@@ -385,6 +441,8 @@ class AtlasDiscordBot(commands.Bot):
             "`!roadmap`\n"
             "`!workflow [workflow_id]`\n"
             "`!heartbeat`\n"
+            "`!usage [today|week|all] "
+            "[all|openai|gemini]`\n"
             "`!alerts`\n"
             "`!ackalerts`\n"
             "`!addtask "
