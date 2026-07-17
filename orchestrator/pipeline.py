@@ -2,12 +2,19 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Protocol
+from typing import (
+    Any,
+    Callable,
+    Protocol,
+)
 
 from core.file_change import FileChange
 from managers.base_manager import BaseManager
 from services.project.repository_grounding_service import (
     RepositoryGroundingService,
+)
+from services.execution_memory.workflow_memory import (
+    WorkflowExecutionMemory,
 )
 from services.planning.execution_plan_context import (
     ExecutionPlanContextService,
@@ -100,6 +107,14 @@ class AtlasPipeline:
             ExecutionPlanContextService | None
         ) = None,
         auto_plan: bool = False,
+        execution_memory_factory: (
+            Callable[
+                [],
+                WorkflowExecutionMemory,
+            ]
+            | None
+        ) = None,
+        auto_execution_memory: bool = False,
     ) -> None:
         if max_iterations < 1:
             raise ValueError(
@@ -136,6 +151,15 @@ class AtlasPipeline:
             or (
                 ExecutionPlanContextService()
                 if auto_plan
+                else None
+            )
+        )
+
+        self.execution_memory_factory = (
+            execution_memory_factory
+            or (
+                WorkflowExecutionMemory
+                if auto_execution_memory
                 else None
             )
         )
@@ -200,6 +224,13 @@ class AtlasPipeline:
         )
         latest_review = ""
         history: list[IterationRecord] = []
+
+        execution_memory = (
+            self.execution_memory_factory()
+            if self.execution_memory_factory
+            is not None
+            else None
+        )
 
         for iteration in range(
             1,
@@ -268,6 +299,30 @@ class AtlasPipeline:
                     and review_decision.approved
                 )
 
+                if execution_memory is not None:
+                    execution_memory.record(
+                        iteration=iteration,
+                        summary=summary,
+                        changed_paths=(
+                            change.path
+                            for change
+                            in file_changes
+                        ),
+                        test_success=(
+                            test_result.success
+                        ),
+                        review_approved=(
+                            review_decision.approved
+                        ),
+                        review_reason=(
+                            review_decision.reason
+                        ),
+                        fix_instruction=(
+                            review_decision
+                            .fix_instruction
+                        ),
+                    )
+
                 history.append(
                     IterationRecord(
                         iteration=iteration,
@@ -335,6 +390,11 @@ class AtlasPipeline:
                         grounding_context=(
                             grounding_context
                         ),
+                        execution_memory_context=(
+                            self._execution_memory_context(
+                                execution_memory
+                            )
+                        ),
                         iteration=(
                             iteration + 1
                         ),
@@ -367,6 +427,28 @@ class AtlasPipeline:
                         stderr=error_message,
                     )
                 )
+
+                if execution_memory is not None:
+                    execution_memory.record(
+                        iteration=iteration,
+                        summary=(
+                            "Worker response processing "
+                            "failed before a valid staged "
+                            "change set was produced."
+                        ),
+                        changed_paths=(),
+                        test_success=False,
+                        review_approved=False,
+                        review_reason=(
+                            "The worker response could "
+                            "not be processed."
+                        ),
+                        fix_instruction=(
+                            "Return valid JSON matching "
+                            "the required schema with "
+                            "complete file contents."
+                        ),
+                    )
 
                 history.append(
                     IterationRecord(
@@ -403,12 +485,21 @@ class AtlasPipeline:
                             "file contents."
                         ),
                         test_output=(
-                            self._render_retry_evidence(
-                                test_output=(
-                                    error_message
+                            self._append_execution_memory(
+                                evidence=(
+                                    self._render_retry_evidence(
+                                        test_output=(
+                                            error_message
+                                        ),
+                                        grounding_context=(
+                                            grounding_context
+                                        ),
+                                    )
                                 ),
-                                grounding_context=(
-                                    grounding_context
+                                execution_memory_context=(
+                                    self._execution_memory_context(
+                                        execution_memory
+                                    )
                                 ),
                             )
                         ),
@@ -437,7 +528,8 @@ class AtlasPipeline:
         decision: ReviewDecision,
         test_result: StagingTestResult,
         grounding_context: str,
-        iteration: int,
+        execution_memory_context: str = "",
+        iteration: int = 1,
     ) -> str:
         evidence = (
             self._render_retry_evidence(
@@ -450,6 +542,15 @@ class AtlasPipeline:
                 ),
                 grounding_context=(
                     grounding_context
+                ),
+            )
+        )
+
+        enriched_evidence = (
+            self._append_execution_memory(
+                evidence=evidence,
+                execution_memory_context=(
+                    execution_memory_context
                 ),
             )
         )
@@ -467,9 +568,45 @@ class AtlasPipeline:
                 fix_instruction=(
                     decision.fix_instruction
                 ),
-                test_output=evidence,
+                test_output=enriched_evidence,
                 iteration=iteration,
             )
+        )
+
+    @staticmethod
+    def _execution_memory_context(
+        memory: WorkflowExecutionMemory | None,
+    ) -> str:
+        if memory is None:
+            return ""
+
+        return (
+            memory.build_context()
+            .rendered_context
+            .strip()
+        )
+
+    @staticmethod
+    def _append_execution_memory(
+        *,
+        evidence: str,
+        execution_memory_context: str,
+    ) -> str:
+        cleaned_evidence = evidence.strip()
+
+        cleaned_memory = (
+            execution_memory_context.strip()
+        )
+
+        if not cleaned_memory:
+            return cleaned_evidence
+
+        if not cleaned_evidence:
+            return cleaned_memory
+
+        return (
+            f"{cleaned_evidence}\n\n"
+            f"{cleaned_memory}"
         )
 
     def _build_planning_context(

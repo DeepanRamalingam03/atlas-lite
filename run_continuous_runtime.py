@@ -58,6 +58,9 @@ from git_tools.engine import GitEngine
 from managers.openai_manager import OpenAIManager
 from orchestrator.pipeline import AtlasPipeline
 from release.coordinator import ReleaseCoordinator
+from services.execution_memory.workflow_memory import (
+    WorkflowExecutionMemory,
+)
 from services.planning.execution_plan_context import (
     ExecutionPlanContextService,
 )
@@ -181,6 +184,59 @@ def boolean_setting(
 
 
 def build_pipeline() -> AtlasPipeline:
+    execution_memory_enabled = (
+        boolean_setting(
+            "ATLAS_EXECUTION_MEMORY_ENABLED",
+            True,
+        )
+    )
+
+    execution_memory_max_attempts = (
+        positive_integer(
+            "ATLAS_EXECUTION_MEMORY_MAX_ATTEMPTS",
+            6,
+        )
+    )
+
+    execution_memory_max_paths = (
+        positive_integer(
+            "ATLAS_EXECUTION_MEMORY_MAX_PATHS",
+            30,
+        )
+    )
+
+    execution_memory_max_field_characters = (
+        positive_integer(
+            "ATLAS_EXECUTION_MEMORY_MAX_FIELD_CHARACTERS",
+            1_500,
+        )
+    )
+
+    execution_memory_max_context_characters = (
+        positive_integer(
+            "ATLAS_EXECUTION_MEMORY_MAX_CONTEXT_CHARACTERS",
+            10_000,
+        )
+    )
+
+    if (
+        execution_memory_max_field_characters
+        < 100
+    ):
+        raise RuntimeError(
+            "ATLAS_EXECUTION_MEMORY_MAX_FIELD_CHARACTERS "
+            "must be at least 100."
+        )
+
+    if (
+        execution_memory_max_context_characters
+        < 1_000
+    ):
+        raise RuntimeError(
+            "ATLAS_EXECUTION_MEMORY_MAX_CONTEXT_CHARACTERS "
+            "must be at least 1000."
+        )
+
     return AtlasPipeline(
         manager=OpenAIManager(
             client=ClientFactory.create(
@@ -223,6 +279,27 @@ def build_pipeline() -> AtlasPipeline:
             else None
         ),
         auto_plan=False,
+        execution_memory_factory=(
+            (
+                lambda: WorkflowExecutionMemory(
+                    max_attempts=(
+                        execution_memory_max_attempts
+                    ),
+                    max_paths_per_attempt=(
+                        execution_memory_max_paths
+                    ),
+                    max_field_characters=(
+                        execution_memory_max_field_characters
+                    ),
+                    max_context_characters=(
+                        execution_memory_max_context_characters
+                    ),
+                )
+            )
+            if execution_memory_enabled
+            else None
+        ),
+        auto_execution_memory=False,
     )
 
 
