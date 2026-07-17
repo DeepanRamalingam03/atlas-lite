@@ -534,6 +534,74 @@ class DiscordRuntimeControls:
             ),
         )
 
+    def retry_task(
+        self,
+        task_id: str,
+    ) -> RuntimeControlResult:
+        cleaned_task_id = task_id.strip()
+
+        if not cleaned_task_id:
+            return RuntimeControlResult(
+                success=False,
+                message=(
+                    "Task ID cannot be empty.\n"
+                    "Usage: `!retry <task-id>`"
+                ),
+            )
+
+        if self.roadmap_store is None:
+            return RuntimeControlResult(
+                success=False,
+                message=(
+                    "Atlas roadmap store "
+                    "is not configured."
+                ),
+            )
+
+        try:
+            task = (
+                self.roadmap_store
+                .retry_failed(
+                    cleaned_task_id
+                )
+            )
+        except KeyError:
+            return RuntimeControlResult(
+                success=False,
+                message=(
+                    "**Atlas Task Retry Failed**\n"
+                    "Roadmap task was not found: "
+                    f"`{cleaned_task_id}`"
+                ),
+            )
+        except Exception as exc:
+            return RuntimeControlResult(
+                success=False,
+                message=(
+                    "**Atlas Task Retry Failed**\n"
+                    f"`{type(exc).__name__}: {exc}`"
+                ),
+            )
+
+        dependencies = (
+            ", ".join(task.depends_on)
+            if task.depends_on
+            else "none"
+        )
+
+        return RuntimeControlResult(
+            success=True,
+            message=(
+                "**Atlas Task Retry Scheduled**\n"
+                f"Task: `{task.task_id}`\n"
+                f"Status: `{task.status.value}`\n"
+                f"Dependencies: `{dependencies}`\n\n"
+                "The continuous runtime will "
+                "automatically select this task "
+                "when its dependencies are ready."
+            ),
+        )
+
     def _heartbeat_summary(self) -> str:
         heartbeat = self.heartbeat_store.load()
 

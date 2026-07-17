@@ -467,6 +467,22 @@ class AtlasDiscordBot(commands.Bot):
                 result.message
             )
 
+        @self.command(name="retry")
+        async def retry_command(
+            context: commands.Context[
+                AtlasDiscordBot
+            ],
+            task_id: str,
+        ) -> None:
+            result = await asyncio.to_thread(
+                self.runtime_controls.retry_task,
+                task_id,
+            )
+
+            await context.send(
+                result.message
+            )
+
         @self.command(name="resume")
         async def resume_command(
             context: commands.Context[

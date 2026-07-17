@@ -326,6 +326,69 @@ class RoadmapTaskStore:
 
         return updated
 
+    def retry_failed(
+        self,
+        task_id: str,
+    ) -> RoadmapTask:
+        """
+        Reset exactly one failed roadmap task to pending.
+
+        Dependencies are not bypassed. The normal roadmap selector
+        decides whether the pending task is ready to run.
+        """
+        with self._lock:
+            data = self._read_data()
+            payload = data.get(task_id)
+
+            if payload is None:
+                raise KeyError(
+                    f"Roadmap task does not exist: {task_id}"
+                )
+
+            if not isinstance(payload, dict):
+                raise RoadmapStoreError(
+                    "Stored roadmap task is invalid."
+                )
+
+            current = self._deserialize(
+                payload
+            )
+
+            if (
+                current.status
+                != RoadmapTaskStatus.FAILED
+            ):
+                raise RoadmapStoreError(
+                    "Only failed roadmap tasks "
+                    "can be retried. "
+                    f"Current status: "
+                    f"{current.status.value}"
+                )
+
+            updated = RoadmapTask(
+                task_id=current.task_id,
+                title=current.title,
+                goal=current.goal,
+                priority=current.priority,
+                sequence=current.sequence,
+                depends_on=current.depends_on,
+                status=(
+                    RoadmapTaskStatus.PENDING
+                ),
+                source=current.source,
+                blocker_reason=None,
+                created_at=current.created_at,
+                updated_at=self._now(),
+            )
+
+            data[task_id] = (
+                self._serialize(updated)
+            )
+
+            self._write_data(data)
+
+        return updated
+
     def delete(
         self,
         task_id: str,
